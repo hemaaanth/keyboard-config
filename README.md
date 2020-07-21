@@ -15,3 +15,4 @@ I use an [XD75 / ID75 / Idobo](https://drop.com/buy/id75-hot-swappable-ortholine
 * Multi-tap trick on shift keys (single-tap = \[, double-tap = (, triple-tap = {)
 * A custom shift layer (core keys all behave as expected with capitalization, everything else does something else weird)
 * Maybe auto-shift (tap keys for regular, hold a bit for capitalization - probably don't want this for games)
+* A steno layer?
