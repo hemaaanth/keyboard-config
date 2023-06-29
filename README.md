@@ -1,18 +1,16 @@
-# Idobo Configuration
-I use an [XD75 / ID75 / Idobo](https://drop.com/buy/id75-hot-swappable-ortholinear-keyboard-kit/); using this repository to store my firmware files and config.
+# Keyboard Config
+Repo to manage keyboard configurations. I use...
+* a Redox wireless w/ my desktop,
+* an XD75 sometimes,
+* and will eventually up(down)grade to a 36 key layout.
 
-## Files
-* Hex (Via-compatible firmware)
-* Config (Specific keymaps / layers I use)
+# Benefits
+* No caps lock, I never use that
+* Easier access to common keys (back/delete/space/enter/square-brackets are all thumb)
+* Media controls, mouse movement, and numpad on another layer for easier use
+* Overall leaving the homerow less means faster typing, but also it's just fun to optimize / customize
 
-## Key functions
-* Tap-dancing left and right shift (tap is \[ and \], hold is the shift function)
-* No caps lock; instead the button enables a second layer with FN buttons, arrow keys, and volume and media controls
-* Another layer that enables mouse controls and buttons on the left side, and a regular-format number pad on the right side
-
-## To add / explore
-* Macros / shortcuts to change tabs
-* Multi-tap trick on shift keys (single-tap = \[, double-tap = (, triple-tap = {)
-* A custom shift layer (core keys all behave as expected with capitalization, everything else does something else weird)
-* Maybe auto-shift (tap keys for regular, hold a bit for capitalization - probably don't want this for games)
-* A steno layer?
+# To explore
+* Shortcuts for window and tab management
+* Mutli-tap keys and home-row modifiers
+* Even more efficiency and less leaving the home row
