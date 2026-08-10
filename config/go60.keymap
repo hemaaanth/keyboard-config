@@ -80,6 +80,43 @@
             tapping-term-ms = <200>;
             bindings = <&bt_select_3>, <&bt BT_DISC 3>;
         };
+
+        // Paseo LEDs spike (config/paseo-leds): global-locality behavior the
+        // central uses to push right-half number-row pixels to the
+        // peripheral. Not bound in any layer -- invoked directly from C via
+        // zmk_behavior_invoke_binding(). Node label kept <=8 chars: it's
+        // sent over the split link as a behavior_dev string.
+        pled: pled {
+            compatible = "paseo,leds-invoke";
+            #binding-cells = <2>;
+        };
+
+        // Paseo LEDs spike (config/paseo-leds): global Paseo-mode toggle,
+        // bound directly below as &plt. Global locality so both halves
+        // flip in lockstep. Node label kept <=8 chars, same reason as
+        // `pled` above.
+        plt: plt {
+            compatible = "paseo,leds-toggle";
+            #binding-cells = <0>;
+        };
+    };
+
+    // Paseo LEDs spike (config/paseo-leds): WS2812 strip indices for the
+    // number row and home-row action keys, derived from go60_lh.dts's
+    // underglow_indicators comment (left half) and a best-effort mirror of
+    // that pattern (right half -- unverified, see
+    // config/paseo-leds/src/paseo_leds.c for the full derivation).
+    // left-number-row-indices / right-number-row-indices are
+    // HARDWARE-VERIFIED -- do not change. left-extra-indices (order: F)
+    // and right-extra-indices (order: Y U J K L SEMI) extend the same
+    // grid; correct the right-half array after on-hardware testing if the
+    // wrong keys light up (see paseo_leds.c's derivation comment).
+    paseo_leds: paseo-leds {
+        compatible = "paseo,leds";
+        left-number-row-indices = <22 17 12 7 3>;
+        right-number-row-indices = <3 7 12 17 22>;
+        left-extra-indices = <9>;
+        right-extra-indices = <4 8 9 14 19 24>;
     };
 
     macros {
@@ -216,14 +253,18 @@
             // for the AutoHotkey bridge (bridge/paseo-deck.ahk):
             //   1-0        -> F13-F22   jump to Paseo workspace slot 1-10
             //   Y / U      -> F23/F24   approve / deny pending permission
-            //   G/P/R/M    -> Shift+F13/F14/F15/F16  commit/push/pr/merge
+            //   H          -> Shift+F17 usage-bar hotkey for the host bridge
+            //   J/K/L/;    -> Shift+F13/F14/F15/F16  commit/push/pr/merge
             //   F          -> Shift+F24 focus the Paseo window
+            //   T          -> &plt      toggle Paseo LEDs sync (both halves)
+            //   W / S      -> Shift+F18/F19  thinking effort up / down
+            //   Q / A      -> Shift+F20/F21  mode up (toward bypass) / down (toward plan)
             bindings = <
-&none  &kp F13  &kp F14  &kp F15  &kp F16      &kp F17                                                    &kp F18  &kp F19      &kp F20  &kp F21  &kp F22      &none
-&none  &none    &none    &none    &kp LS(F15)  &none                                                      &kp F23  &kp F24      &none    &none    &kp LS(F14)  &none
-&none  &none    &none    &none    &kp LS(F24)  &kp LS(F13)                                                &none    &none        &none    &none    &none        &none
-&none  &none    &none    &none    &none        &none                                                      &none    &kp LS(F16)  &none    &none    &none        &none
-                &none    &none    &none                                                                            &none        &none    &none
+&none  &kp F13      &kp F14      &kp F15  &kp F16      &kp F17                                            &kp F18      &kp F19      &kp F20      &kp F21      &kp F22  &none
+&none  &kp LS(F20)  &kp LS(F18)  &none    &none        &plt                                               &kp F23      &kp F24      &none        &none        &none    &none
+&none  &kp LS(F21)  &kp LS(F19)  &none    &kp LS(F24)  &none                                              &kp LS(F17)  &kp LS(F13)  &kp LS(F14)  &kp LS(F15)  &kp LS(F16)  &none
+&none  &none    &none    &none    &none        &none                                                      &none        &none        &none        &none        &none    &none
+                &none    &none    &none                                                                                &none        &none        &none
                                                             &none  &none  &none  &none  &none  &none
             >;
         };

@@ -101,6 +101,48 @@ cmd_action() {
     echo "sent $verb to $agent_id"
 }
 
+# mode <slot> up|down — step through the agent's AvailableModes ladder
+# (inspect lists them plan -> bypassPermissions; up = toward bypass).
+cmd_mode() {
+    local slot="${1:?slot required}" dir="${2:?up|down required}" out agent_id info current
+    out=$(resolve_agent "$slot") || { echo "$out"; exit 1; }
+    agent_id=$(cut -f1 <<<"$out")
+    info=$("$PASEO" agent inspect "$agent_id" --json)
+    current=$(echo "$info" | "$JQ" -r '.Mode')
+    local next
+    next=$(echo "$info" | "$JQ" -r --arg cur "$current" --arg dir "$dir" '
+        [.AvailableModes[].id] as $ladder | ($ladder | index($cur)) as $i
+        | if $i == null then empty
+          elif $dir == "up" then $ladder[[$i + 1, ($ladder|length) - 1] | min]
+          else $ladder[[$i - 1, 0] | max] end')
+    [ -n "$next" ] || { echo "unknown current mode '$current'"; exit 1; }
+    [ "$next" != "$current" ] || { echo "mode already at ${current}"; exit 0; }
+    "$PASEO" agent mode "$agent_id" "$next" >/dev/null
+    echo "mode: $next"
+}
+
+# effort <slot> up|down — step the thinking level. No API lists valid
+# levels, so walk a superset ladder and skip tiers the provider rejects.
+cmd_effort() {
+    local slot="${1:?slot required}" dir="${2:?up|down required}" out agent_id current
+    local ladder=(minimal low medium high xhigh max)
+    out=$(resolve_agent "$slot") || { echo "$out"; exit 1; }
+    agent_id=$(cut -f1 <<<"$out")
+    current=$("$PASEO" agent inspect "$agent_id" --json | "$JQ" -r '.Thinking')
+    local i=-1 j
+    for j in "${!ladder[@]}"; do [ "${ladder[$j]}" = "$current" ] && i=$j; done
+    [ "$i" -ge 0 ] || { echo "unknown thinking level '$current'"; exit 1; }
+    local step=1; [ "$dir" = "down" ] && step=-1
+    j=$((i + step))
+    while [ "$j" -ge 0 ] && [ "$j" -lt "${#ladder[@]}" ]; do
+        if "$PASEO" agent update "$agent_id" --thinking "${ladder[$j]}" >/dev/null 2>&1; then
+            echo "effort: ${ladder[$j]}"; return 0
+        fi
+        j=$((j + step))
+    done
+    echo "effort already at ${current} (no further level accepted)"; exit 1
+}
+
 main() {
     local sub="${1:-}"
     [ $# -gt 0 ] && shift
@@ -109,7 +151,9 @@ main() {
         approve) cmd_permit approve "$@" ;;
         deny) cmd_permit deny "$@" ;;
         action) cmd_action "$@" ;;
-        *) echo "usage: paseo-deck.sh {resolve <slot>|approve [slot]|deny [slot]|action <slot> <verb>}"; exit 1 ;;
+        mode) cmd_mode "$@" ;;
+        effort) cmd_effort "$@" ;;
+        *) echo "usage: paseo-deck.sh {resolve <slot>|approve [slot]|deny [slot]|action <slot> <verb>|mode <slot> up|down|effort <slot> up|down}"; exit 1 ;;
     esac
 }
 

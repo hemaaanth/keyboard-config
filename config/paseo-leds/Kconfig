@@ -1,0 +1,13 @@
+# Paseo LEDs -- Phase 2 firmware spike (per-key RGB over BLE, number row)
+# SPDX-License-Identifier: MIT
+
+config PASEO_LEDS
+    bool "Paseo per-key BLE LED control for the number row (spike)"
+    default y
+    select ZMK_RGB_UNDERGLOW
+    help
+      Adds a custom BLE GATT service (central/left half only) that lets a
+      host push per-key RGB values for the number row (1-5 on the left
+      half, 6-0 on the right half) over the existing wireless split link,
+      writing straight to the WS2812 strip. Research spike, not a real
+      feature: no persistence, no animation, last-frame-wins.

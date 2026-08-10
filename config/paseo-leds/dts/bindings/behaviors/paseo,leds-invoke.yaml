@@ -1,0 +1,16 @@
+# Paseo LEDs -- Phase 2 firmware spike (per-key RGB over BLE, number row)
+# SPDX-License-Identifier: MIT
+
+description: |
+  Global-locality behavior used internally by the paseo-leds GATT write
+  handler (central/left half) to push right-half pixel updates to the
+  peripheral over the split link. Not meant to be bound in a keymap layer.
+  param1/param2 each pack one pixel as index<<24 | r<<16 | g<<8 | b; param2
+  may be the sentinel 0xFFFFFFFF meaning "no second pixel this call". The
+  index byte may also be 0xFE, the fill-all sentinel: the peripheral fills
+  and flushes its entire strip with r,g,b instead of looking the index up
+  in right-number-row-indices/right-extra-indices (see paseo_leds.c).
+
+compatible: "paseo,leds-invoke"
+
+include: two_param.yaml

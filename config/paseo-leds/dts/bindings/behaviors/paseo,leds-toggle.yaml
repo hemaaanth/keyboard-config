@@ -1,0 +1,15 @@
+# Paseo LEDs -- Phase 2 firmware spike (per-key RGB over BLE, number row)
+# SPDX-License-Identifier: MIT
+
+description: |
+  Global-locality Paseo-mode toggle. Bound directly in the keymap (&plt) so
+  pressing it on either half flips the paseo_leds_enabled flag on BOTH
+  halves in lockstep. Frame/behavior-invocation pixel writes always keep
+  updating each half's pixel buffer; only the led_strip flush is gated on
+  this flag. Disabling blanks the strip once (writes off pixels straight
+  to the strip, buffer untouched); re-enabling flushes the stored buffer
+  immediately. See paseo_leds_toggle.c / paseo_leds.c.
+
+compatible: "paseo,leds-toggle"
+
+include: zero_param.yaml
