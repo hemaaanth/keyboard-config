@@ -3,3 +3,6 @@ zmk/
 modules/
 tools/
 .west/
+go60.uf2
+combined
+.worktrees/
