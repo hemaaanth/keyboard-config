@@ -23,7 +23,11 @@ jobs:
           path: src
       - uses: cachix/install-nix-action@v25
         with:
-          nix_path: nixpkgs=channel:nixos-22.05
+          # Must match the environment the local build script uses
+          # (scripts/build-go60-local.sh runs a nixos-23.11 container);
+          # 22.05's nanopb module ships a protoc whose loader is missing,
+          # failing with "protoc: not found".
+          nix_path: nixpkgs=channel:nixos-23.11
       - uses: cachix/cachix-action@v14
         with:
           name: moergo-glove80-zmk-dev
