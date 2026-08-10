@@ -27,7 +27,8 @@ Copy-Item $src (Join-Path $dir "paseo-led-bridge.exe") -Force
 
 $vbs = Join-Path $dir "paseo-led-bridge-hidden.vbs"
 $exe = Join-Path $dir "paseo-led-bridge.exe"
-Set-Content -Path $vbs -Value ("CreateObject(""Wscript.Shell"").Run """"""" + $exe + """""" run"", 0")
+$vbsContent = 'CreateObject("Wscript.Shell").Run """{0}"" run", 0' -f $exe
+Set-Content -Path $vbs -Value $vbsContent
 
 $action  = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$vbs`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
