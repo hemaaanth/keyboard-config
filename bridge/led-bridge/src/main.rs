@@ -891,9 +891,14 @@ fn parse_ws_text(raw: &str) -> Vec<WsEvent> {
 /// `protocolVersion` closes with 4003). Top-level -- NOT session-wrapped
 /// (only `hello` and `ping` are).
 fn hello_message() -> serde_json::Value {
+    // clientId must be unique per PROCESS: the daemon treats a matching
+    // clientId as a session takeover, so two instances with the same id
+    // steal the session from each other in a loop (live incident: slots
+    // dark, F lit, while a scheduled-task instance and a manual instance
+    // fought over one session).
     serde_json::json!({
         "type": "hello",
-        "clientId": "paseo-led-bridge",
+        "clientId": format!("paseo-led-bridge-{}", std::process::id()),
         "clientType": "cli",
         "protocolVersion": 1,
         "appVersion": env!("CARGO_PKG_VERSION"),
@@ -1548,8 +1553,16 @@ mod winrt {
         const HOTKEY_ID: i32 = 1;
         unsafe {
             if let Err(e) = RegisterHotKey(None, HOTKEY_ID, MOD_SHIFT, VK_F17.0 as u32) {
-                eprintln!("led-bridge: RegisterHotKey(Shift+F17) failed: {e}; usage-bar hotkey disabled");
-                return;
+                // Doubles as the single-instance guard: every `run` registers
+                // this hotkey, so a failure here means another bridge is
+                // already running -- two writers corrupt the LED state, so
+                // die loudly instead of limping along.
+                eprintln!(
+                    "led-bridge: FATAL: Shift+F17 already registered ({e}) -- another \
+                     paseo-led-bridge instance is likely running (check Task Manager and \
+                     the PaseoLedBridge scheduled task). Exiting."
+                );
+                std::process::exit(2);
             }
         }
         println!("led-bridge: usage-bar hotkey armed (Shift+F17)");
@@ -2565,7 +2578,7 @@ mod tests {
         // hello is top-level -- NOT session-wrapped.
         let hello = hello_message();
         assert_eq!(hello["type"], "hello");
-        assert_eq!(hello["clientId"], "paseo-led-bridge");
+        assert!(hello["clientId"].as_str().unwrap().starts_with("paseo-led-bridge-"));
         assert_eq!(hello["clientType"], "cli");
         assert_eq!(hello["protocolVersion"], 1);
         assert!(hello["appVersion"].is_string());
