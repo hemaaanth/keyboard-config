@@ -2,7 +2,17 @@
 
 Canonical repository for my keyboard firmware and layouts.
 
-## Active keyboard: Eyelash Corne
+## Active keyboard: MoErgo Go60
+
+Wireless split Go60 running [MoErgo's ZMK fork](https://github.com/moergo-sc/zmk).
+
+- `config/go60.keymap` — keymap, including the Paseo control layer (see [docs/go60-paseo-layer.md](docs/go60-paseo-layer.md))
+- `config/go60.conf` / `config/default.nix` — ZMK config and nix build definition
+- `scripts/build-go60-local.sh` — local firmware build (podman/docker + nix) producing `go60.uf2`
+- `.github/workflows/build-go60.yml` — the same build on GitHub Actions
+- `bridge/` — Paseo Deck: AutoHotkey + WSL helper that turns the Paseo layer's F13–F24 keys into agent controls ([bridge/README.md](bridge/README.md))
+
+## Eyelash Corne
 
 The active setup is a wireless **Eyelash Peripherals Corne** running ZMK. This board is not the same as [foostan's Corne](https://github.com/foostan/crkbd) and does not use standard `corne` firmware.
 
