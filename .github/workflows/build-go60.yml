@@ -28,6 +28,12 @@ jobs:
           # 22.05's nanopb module ships a protoc whose loader is missing,
           # failing with "protoc: not found".
           nix_path: nixpkgs=channel:nixos-23.11
+          # The nanopb module's generator/protoc wrapper needs an
+          # interpreter from outside the nix store; the local build script
+          # also runs with the sandbox off (it appends "sandbox = false"
+          # to nix.conf in its container).
+          extra_nix_config: |
+            sandbox = false
       - uses: cachix/cachix-action@v14
         with:
           name: moergo-glove80-zmk-dev
