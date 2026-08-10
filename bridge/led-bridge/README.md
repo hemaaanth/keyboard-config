@@ -105,6 +105,23 @@ hotkey listener, and the foreground-window poller are all senders into one
 channel; the main loop is the only receiver, owns the BLE connection, and
 is the only place frames get composed and written.
 
+#### Autostart (background, at logon, with crash restarts)
+
+From this folder, on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-autostart.ps1
+```
+
+Copies the exe to `%LOCALAPPDATA%\PaseoLedBridge\`, wraps it in a hidden-
+window launcher, and registers a **PaseoLedBridge** Scheduled Task: starts
+at logon in your user session (required for BLE + foreground detection)
+and restarts up to 3× a minute apart on a crash. The bridge already
+reconnects forever on WS/BLE failures, so restarts only cover hard
+crashes. Manage or remove it in Task Scheduler; to debug, stop the task
+and run `paseo-led-bridge.exe run` in a terminal instead. After updating
+the exe, re-run the installer to refresh the local copy.
+
 #### Key map & color legend
 
 | Key | Logical index | Meaning | Color |

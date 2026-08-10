@@ -28,6 +28,15 @@ jobs:
         with:
           name: moergo-glove80-zmk-dev
           skipPush: true
+      # Same nix patches scripts/build-go60-local.sh applies: MoErgo's zmk.nix
+      # is missing protobuf/setuptools, so the nanopb generator can't find
+      # protoc and the build dies at "protoc: not found".
+      - name: Patch MoErgo nix build (protoc/setuptools)
+        run: |
+          sed -i "/    pykwalify/a\    setuptools" src/nix/zmk.nix
+          sed -i "/    setuptools/a\    ps.protobuf" src/nix/zmk.nix
+          sed -i "s/, cmake, ninja, dtc, gcc-arm-embedded/, cmake, ninja, dtc, gcc-arm-embedded, protobuf/" src/nix/zmk.nix
+          sed -i "s/nativeBuildInputs = \[ cmake ninja python dtc gcc-arm-embedded \]/nativeBuildInputs = [ cmake ninja python dtc gcc-arm-embedded protobuf ]/" src/nix/zmk.nix
       - name: Build Go60 combined firmware
         run: nix-build config -o combined
       - name: Copy result out of nix store

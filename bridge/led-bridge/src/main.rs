@@ -51,7 +51,10 @@ const FRAME_LEN: usize = 17;
 const FILL_ALL_INDEX: u8 = 0xFE;
 
 // Status colors (slot LEDs 0-9).
-const COLOR_DONE: (u8, u8, u8) = (0x0A, 0x0A, 0x0A);
+// Full white -- the firmware clamps all channels to its 40% power ceiling,
+// and "white" alone signals idle; dimming it below the other colors was
+// unnecessary (user feedback).
+const COLOR_DONE: (u8, u8, u8) = (0xFF, 0xFF, 0xFF);
 const COLOR_NEEDS_INPUT: (u8, u8, u8) = (0xFF, 0x5F, 0x00);
 const COLOR_ATTENTION: (u8, u8, u8) = (0x00, 0xC8, 0x00);
 const COLOR_FAILED: (u8, u8, u8) = (0xFF, 0x00, 0x00);
@@ -69,8 +72,8 @@ const COLOR_PR: (u8, u8, u8) = (0xA0, 0x20, 0xF0);
 const COLOR_MERGE: (u8, u8, u8) = (0xFF, 0x20, 0x00);
 // F is inverted vs. J/K/L/;: a "press to focus" call-to-action while Paseo
 // is NOT foreground, dim once it is (no action needed).
-const COLOR_FOCUS_CTA: (u8, u8, u8) = (0x40, 0x40, 0x40);
-const COLOR_FOCUS_DIM: (u8, u8, u8) = (0x0A, 0x0A, 0x0A);
+// F is a constant beacon -- no foreground-based fading (user feedback).
+const COLOR_FOCUS: (u8, u8, u8) = (0xFF, 0xFF, 0xFF);
 
 fn main() -> Result<()> {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
@@ -500,8 +503,8 @@ fn action_indicator_colors(foreground_is_paseo: bool) -> [Option<(u8, u8, u8)>; 
 /// F (logical 16): inverted from J/K/L/; -- a bright "press to focus"
 /// call-to-action while Paseo is NOT foreground, dim once it is (nothing
 /// to do). Never off.
-fn focus_indicator_color(foreground_is_paseo: bool) -> (u8, u8, u8) {
-    if foreground_is_paseo { COLOR_FOCUS_DIM } else { COLOR_FOCUS_CTA }
+fn focus_indicator_color(_foreground_is_paseo: bool) -> (u8, u8, u8) {
+    COLOR_FOCUS
 }
 
 /// Composes the full normal status frame (slots + permission glow +
@@ -2007,7 +2010,7 @@ mod tests {
 
     #[test]
     fn status_color_map() {
-        assert_eq!(Status::Done.color(), (0x0A, 0x0A, 0x0A));
+        assert_eq!(Status::Done.color(), (0xFF, 0xFF, 0xFF));
         assert_eq!(Status::NeedsInput.color(), (0xFF, 0x5F, 0x00));
         assert_eq!(Status::Attention.color(), (0x00, 0xC8, 0x00));
         assert_eq!(Status::Failed.color(), (0xFF, 0x00, 0x00));
@@ -2124,12 +2127,12 @@ mod tests {
         assert_eq!(f[IDX_K as usize], COLOR_PUSH);
         assert_eq!(f[IDX_L as usize], COLOR_PR);
         assert_eq!(f[IDX_SEMI as usize], COLOR_MERGE);
-        assert_eq!(f[IDX_F as usize], COLOR_FOCUS_DIM);
+        assert_eq!(f[IDX_F as usize], COLOR_FOCUS);
 
         // not foreground: J/K/L/; off, F bright (call to action)
         let f2 = compute_status_frame(&store, false, now);
         assert_eq!(f2[IDX_J as usize], COLOR_OFF);
-        assert_eq!(f2[IDX_F as usize], COLOR_FOCUS_CTA);
+        assert_eq!(f2[IDX_F as usize], COLOR_FOCUS);
     }
 
     #[test]
