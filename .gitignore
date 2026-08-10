@@ -6,3 +6,4 @@ tools/
 go60.uf2
 combined
 .worktrees/
+bridge/led-bridge/target/

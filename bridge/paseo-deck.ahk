@@ -110,5 +110,22 @@ SendAction(verb) {
     RunHelper("action " activeSlot " " verb)
 }
 
+; --- Shift+F18/F19: thinking effort up/down on the active slot ---------------
++F18:: SendLevel("effort", "up")
++F19:: SendLevel("effort", "down")
+
+; --- Shift+F20/F21: mode up (toward bypass) / down (toward plan) -------------
++F20:: SendLevel("mode", "up")
++F21:: SendLevel("mode", "down")
+
+SendLevel(kind, dir) {
+    global activeSlot
+    if activeSlot = 0 {
+        TrayTip("press an agent key first", "Paseo Deck")
+        return
+    }
+    RunHelper(kind " " activeSlot " " dir)
+}
+
 ; --- Shift+F24: focus Paseo only --------------------------------------------
 +F24:: FocusPaseo()

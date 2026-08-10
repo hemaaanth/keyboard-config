@@ -22,6 +22,8 @@ Go60 (ZMK) --F13-F24--> Windows (AHK v2) --wsl.exe--> bash helper --> paseo CLI
 | Shift+F15 | Open a PR on the active slot's agent                  |
 | Shift+F16 | Merge the open PR on the active slot's agent           |
 | Shift+F24 | Focus Paseo only                                       |
+| Shift+F18/F19 | Thinking effort up / down on the active slot's agent |
+| Shift+F20/F21 | Mode up (toward bypass) / down (toward plan)         |
 
 "Active slot" is whichever F13-F22 key was pressed most recently.
 

@@ -1,0 +1,48 @@
+# Paseo LEDs -- Phase 2 firmware spike (per-key RGB over BLE, number row)
+# SPDX-License-Identifier: MIT
+
+description: |
+  Paseo per-key BLE LED spike: WS2812 strip-index lookup tables for the
+  number row and the home-row action keys, one entry per logical key.
+  Logical index 0-4 = left-half keys 1-5, logical index 5-9 (array index
+  0-4 in right-number-row-indices) = right-half keys 6,7,8,9,0, logical
+  index 10-15 (array index 0-5 in right-extra-indices, order Y U J K L
+  SEMI) = right-half home-row action keys, logical index 16 (the single
+  entry in left-extra-indices) = left-half F. Index 0xFE in a frame/
+  behavior-invocation pixel entry is not a logical index at all -- it's
+  the fill-all sentinel (see paseo_leds.c) and doesn't consult either
+  table.
+
+  left-number-row-indices is derived directly from the commented physical
+  layout on go60_lh.dts's `underglow_indicators` node (row 0 = top row):
+  N1=22 N2=17 N3=12 N4=7 N5=3.
+
+  right-number-row-indices has NO equivalent documented source (go60_rh.dts
+  ships no underglow-indicators node at all) -- it's a best-effort mirror
+  of the left-half zig-zag wiring pattern by column position, NOT verified
+  on hardware. Kept as a devicetree property (rather than hardcoded in C)
+  specifically so it's a one-line fix here after on-hardware testing.
+
+  left-extra-indices / right-extra-indices extend the same lookup to F
+  (left) and Y, U, J, K, L, SEMI (right) -- see paseo_leds.c for the full
+  column-arithmetic derivation. left-extra-indices is read directly off
+  the same hardware-verified left-half grid as left-number-row-indices
+  (same certainty). right-extra-indices carries the same not-verified-on-
+  hardware caveat as right-number-row-indices: it's the same column-
+  mirroring assumption applied one row down, not an independent guess.
+
+compatible: "paseo,leds"
+
+properties:
+  left-number-row-indices:
+    type: array
+    required: true
+  right-number-row-indices:
+    type: array
+    required: true
+  left-extra-indices:
+    type: array
+    required: true
+  right-extra-indices:
+    type: array
+    required: true
