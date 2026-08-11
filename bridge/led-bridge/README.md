@@ -121,7 +121,8 @@ and restarts up to 3× a minute apart on a crash. The bridge already
 reconnects forever on WS/BLE failures, so restarts only cover hard
 crashes. Manage or remove it in Task Scheduler; to debug, stop the task
 and run `paseo-led-bridge.exe run` in a terminal instead. After updating
-the exe, re-run the installer to refresh the local copy.
+the exe, re-run the installer; it stops the old bridge, replaces it, and
+starts the new one.
 
 #### Key map & color legend
 
