@@ -6,6 +6,7 @@ on:
     paths:
       - "config/go60.keymap"
       - "config/go60.conf"
+      - "config/paseo-leds/**"
       - "config/default.nix"
       - ".github/workflows/build-go60.yml"
 

@@ -1,7 +1,7 @@
 //! Host-side BLE bridge for the Go60 keyboard LED project.
 //!
 //! Connects to a ZMK keyboard's custom GATT LED service and writes frames
-//! that light up keys 1-9,0 plus Y U J K L ; F (logical indices 10-16). See
+//! that light up status keys and full usage columns. See
 //! `bridge/led-bridge/README.md` for usage.
 //!
 //! `run` is the live-sync daemon: it connects to the Paseo daemon's
@@ -45,7 +45,10 @@ const IDX_K: u8 = 13;
 const IDX_L: u8 = 14;
 const IDX_SEMI: u8 = 15;
 const IDX_F: u8 = 16;
-const FRAME_LEN: usize = 17;
+const IDX_D: u8 = 17;
+const FRAME_LEN: usize = 18;
+const USAGE_COLUMN_FIRST: u8 = 18;
+const USAGE_COLUMN_COUNT: u8 = 12;
 /// Fill-all op: a frame entry with this index byte sets all 30 LEDs on both
 /// halves to that r,g,b. Later entries in the same frame layer on top.
 const FILL_ALL_INDEX: u8 = 0xFE;
@@ -74,6 +77,7 @@ const COLOR_MERGE: (u8, u8, u8) = (0xFF, 0x20, 0x00);
 // is NOT foreground, dim once it is (no action needed).
 // F is a constant beacon -- no foreground-based fading (user feedback).
 const COLOR_FOCUS: (u8, u8, u8) = (0xFF, 0xFF, 0xFF);
+const COLOR_CHAT: (u8, u8, u8) = (0xFF, 0xE0, 0x00);
 
 fn main() -> Result<()> {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
@@ -329,7 +333,64 @@ struct WorkspaceDescriptor {
     pinned_at: Option<String>,
     #[serde(rename = "archivingAt")]
     archiving_at: Option<String>,
+    cwd: String,
     status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default)]
+struct PendingPermissionDescriptor {
+    kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default)]
+struct AgentDescriptor {
+    id: String,
+    #[serde(rename = "workspaceId")]
+    workspace_id: Option<String>,
+    cwd: String,
+    #[serde(rename = "pendingPermissions")]
+    pending_permissions: Vec<PendingPermissionDescriptor>,
+}
+
+/// Tracks only real permission requests. Paseo represents questions as
+/// permission-shaped records too, but their `question` kind must not make
+/// Y/U appear: those keys mean allow/deny, not answer a question.
+#[derive(Debug, Default)]
+struct PermissionStore {
+    agents: HashMap<String, AgentDescriptor>,
+}
+
+impl PermissionStore {
+    fn apply_snapshot(&mut self, entries: Vec<AgentDescriptor>) {
+        self.agents = entries.into_iter().map(|agent| (agent.id.clone(), agent)).collect();
+    }
+
+    fn apply_upsert(&mut self, agent: AgentDescriptor) {
+        self.agents.insert(agent.id.clone(), agent);
+    }
+
+    fn apply_remove(&mut self, id: &str) {
+        self.agents.remove(id);
+    }
+
+    fn has_for_slots(&self, workspaces: &WorkspaceStore) -> bool {
+        self.agents.values().any(|agent| {
+            let slotted = agent
+                .workspace_id
+                .as_ref()
+                .map(|id| workspaces.slot_ids().iter().any(|slot| slot == id))
+                .unwrap_or_else(|| {
+                    workspaces
+                        .slot_ids()
+                        .iter()
+                        .filter_map(|id| workspaces.workspaces.get(id))
+                        .any(|workspace| !agent.cwd.is_empty() && workspace.cwd == agent.cwd)
+                });
+            slotted && agent.pending_permissions.iter().any(|permission| permission.kind != "question")
+        })
+    }
 }
 
 /// Slots 1..10 = workspaces where `pinnedAt` is non-null AND `archivingAt`
@@ -477,15 +538,10 @@ fn slot_colors(store: &WorkspaceStore, now: Instant) -> [(u8, u8, u8); 10] {
     out
 }
 
-/// Permission glow (feature 4): Y and U both follow the same condition --
-/// any *slotted* workspace (pinned, non-archiving, one of the current top
-/// 10) currently needs input.
-fn permission_glow(store: &WorkspaceStore) -> bool {
-    store
-        .slot_ids()
-        .iter()
-        .filter_map(|id| store.workspaces.get(id))
-        .any(|w| Status::from_wire(&w.status) == Some(Status::NeedsInput))
+/// Permission glow (feature 4): Y/U appear only for a real, non-question
+/// permission belonging to a slotted workspace.
+fn permission_glow(store: &WorkspaceStore, permissions: &PermissionStore) -> bool {
+    permissions.has_for_slots(store)
 }
 
 /// Foreground-window action indicator colors (feature 3), J K L ; in that
@@ -509,12 +565,17 @@ fn focus_indicator_color(_foreground_is_paseo: bool) -> (u8, u8, u8) {
 
 /// Composes the full normal status frame (slots + permission glow +
 /// action indicators).
-fn compute_status_frame(store: &WorkspaceStore, foreground_is_paseo: bool, now: Instant) -> Frame17 {
+fn compute_status_frame(
+    store: &WorkspaceStore,
+    permissions: &PermissionStore,
+    foreground_is_paseo: bool,
+    now: Instant,
+) -> Frame17 {
     let mut f = off_frame();
     let colors = slot_colors(store, now);
     f[..10].copy_from_slice(&colors);
-    let glow = if permission_glow(store) { COLOR_PERMISSION_Y } else { COLOR_OFF };
-    let glow_u = if permission_glow(store) { COLOR_PERMISSION_U } else { COLOR_OFF };
+    let glow = if permission_glow(store, permissions) { COLOR_PERMISSION_Y } else { COLOR_OFF };
+    let glow_u = if permission_glow(store, permissions) { COLOR_PERMISSION_U } else { COLOR_OFF };
     f[IDX_Y as usize] = glow;
     f[IDX_U as usize] = glow_u;
     let [j, k, l, semi] = action_indicator_colors(foreground_is_paseo);
@@ -523,6 +584,7 @@ fn compute_status_frame(store: &WorkspaceStore, foreground_is_paseo: bool, now: 
     f[IDX_L as usize] = l.unwrap_or(COLOR_OFF);
     f[IDX_SEMI as usize] = semi.unwrap_or(COLOR_OFF);
     f[IDX_F as usize] = focus_indicator_color(foreground_is_paseo);
+    f[IDX_D as usize] = if foreground_is_paseo { COLOR_CHAT } else { COLOR_OFF };
     f
 }
 
@@ -590,14 +652,13 @@ struct UsageEntry {
     resets_at: String,
 }
 
-/// Fixed display order: claude five_hour, claude weekly, codex session
-/// (its primary window), codex weekly (only sometimes present). Absent
-/// entries are skipped (not padded). Any claude window whose id starts
+/// Fixed display order: Claude five-hour, Claude weekly, then Codex weekly.
+/// Absent entries are skipped (not padded). Any Claude window whose id starts
 /// with "weekly_model" (extra per-model windows, e.g.
 /// "weekly_model_fable") is appended after these, in provider order --
 /// see `ordered_usage_entries`.
-const USAGE_DISPLAY_ORDER: [(&str, &str); 4] =
-    [("claude", "five_hour"), ("claude", "weekly"), ("codex", "session"), ("codex", "weekly")];
+const USAGE_DISPLAY_ORDER: [(&str, &str); 3] =
+    [("claude", "five_hour"), ("claude", "weekly"), ("codex", "weekly")];
 
 fn usage_entry(provider_key: &str, window_key: &str, p: &UsageProvider, w: &UsageWindow) -> UsageEntry {
     UsageEntry {
@@ -649,25 +710,33 @@ fn segments_lit(used_pct: f64) -> u8 {
     n
 }
 
-/// Segment color: 1-5 green, 6-8 yellow, 9-10 red. `seg` is 1-indexed.
+/// Ten distinct hues from green through yellow and orange to red.
+/// `seg` is 1-indexed.
 fn segment_color(seg: u8) -> (u8, u8, u8) {
-    match seg {
-        1..=5 => COLOR_ATTENTION, // green
-        6..=8 => COLOR_NEEDS_INPUT, // yellow (0xFF5F00)
-        _ => COLOR_FAILED, // red (9, 10)
-    }
+    hsv_to_rgb(120.0 - ((seg.saturating_sub(1).min(9) as f32) * (120.0 / 9.0)), 1.0, 1.0)
 }
 
-/// Renders the usage bar onto the number row (logical 0-9); action/
-/// permission keys (10-16) are off.
-fn usage_bar_frame(used_pct: f64) -> Frame17 {
-    let mut f = off_frame();
+/// Renders 12 full-height columns: fixed green/red end markers and ten
+/// inner usage columns. A fill-off clears all prior status LEDs first.
+fn usage_bar_pixels(used_pct: f64) -> Vec<(u8, u8, u8, u8)> {
     let lit = segments_lit(used_pct);
-    for seg in 1..=10u8 {
-        let idx = (seg - 1) as usize;
-        f[idx] = if seg <= lit { segment_color(seg) } else { COLOR_OFF };
+    let mut pixels = vec![(FILL_ALL_INDEX, 0, 0, 0)];
+    for column in 0..USAGE_COLUMN_COUNT {
+        let color = match column {
+            0 => segment_color(1),
+            11 => segment_color(10),
+            _ => {
+                let segment = column;
+                if segment <= lit {
+                    segment_color(segment)
+                } else {
+                    COLOR_OFF
+                }
+            }
+        };
+        pixels.push((USAGE_COLUMN_FIRST + column, color.0, color.1, color.2));
     }
-    f
+    pixels
 }
 
 // --- 90% usage alarm (feature 6) -----------------------------------------
@@ -812,6 +881,9 @@ enum WsEvent {
     WorkspacesSnapshot { entries: Vec<WorkspaceDescriptor>, has_more: bool },
     WorkspaceUpsert(WorkspaceDescriptor),
     WorkspaceRemove(String),
+    AgentsSnapshot(Vec<AgentDescriptor>),
+    AgentUpsert(AgentDescriptor),
+    AgentRemove(String),
     UsageResponse { request_id: String, providers: Vec<UsageProvider> },
     RpcError { request_type: String, error: String },
 }
@@ -831,6 +903,18 @@ struct FetchWorkspacesPayload {
     page_info: PageInfo,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct FetchAgentsPayload {
+    entries: Vec<AgentDirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct AgentDirectoryEntry {
+    agent: AgentDescriptor,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind")]
 enum WorkspaceUpdate {
@@ -838,6 +922,15 @@ enum WorkspaceUpdate {
     Upsert { workspace: WorkspaceDescriptor },
     #[serde(rename = "remove")]
     Remove { id: String },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind")]
+enum AgentUpdate {
+    #[serde(rename = "upsert")]
+    Upsert { agent: AgentDescriptor },
+    #[serde(rename = "remove")]
+    Remove { #[serde(rename = "agentId")] agent_id: String },
 }
 
 fn parse_inner_message(inner: &serde_json::Value) -> Vec<WsEvent> {
@@ -851,6 +944,15 @@ fn parse_inner_message(inner: &serde_json::Value) -> Vec<WsEvent> {
         "workspace_update" => match serde_json::from_value::<WorkspaceUpdate>(payload.clone()) {
             Ok(WorkspaceUpdate::Upsert { workspace }) => vec![WsEvent::WorkspaceUpsert(workspace)],
             Ok(WorkspaceUpdate::Remove { id }) => vec![WsEvent::WorkspaceRemove(id)],
+            Err(_) => Vec::new(),
+        },
+        "fetch_agents_response" => match serde_json::from_value::<FetchAgentsPayload>(payload.clone()) {
+            Ok(p) => vec![WsEvent::AgentsSnapshot(p.entries.into_iter().map(|entry| entry.agent).collect())],
+            Err(_) => Vec::new(),
+        },
+        "agent_update" => match serde_json::from_value::<AgentUpdate>(payload.clone()) {
+            Ok(AgentUpdate::Upsert { agent }) => vec![WsEvent::AgentUpsert(agent)],
+            Ok(AgentUpdate::Remove { agent_id }) => vec![WsEvent::AgentRemove(agent_id)],
             Err(_) => Vec::new(),
         },
         "provider.usage.list.response" => {
@@ -919,6 +1021,17 @@ fn fetch_workspaces_request_message(request_id: &str) -> serde_json::Value {
         "type": "fetch_workspaces_request",
         "requestId": request_id,
         "sort": [{"key": "activity_at", "direction": "desc"}],
+        "page": {"limit": 200},
+        "subscribe": {},
+    }))
+}
+
+/// Fetches agents and subscribes to updates so permission LEDs can distinguish
+/// actual tool permissions from agent questions.
+fn fetch_agents_request_message(request_id: &str) -> serde_json::Value {
+    session_wrap(serde_json::json!({
+        "type": "fetch_agents_request",
+        "requestId": request_id,
         "page": {"limit": 200},
         "subscribe": {},
     }))
@@ -1008,10 +1121,10 @@ fn run_run(_name_filter: &str, _ws_url: &str) -> Result<()> {
 #[cfg(windows)]
 mod winrt {
     use super::{
-        chunk_pixels, compute_status_frame, detect_crossings, fetch_workspaces_request_message, fill_all_pixels,
+        chunk_pixels, compute_status_frame, detect_crossings, fetch_agents_request_message, fetch_workspaces_request_message, fill_all_pixels,
         hello_message, is_paseo_foreground, next_request_id, ordered_usage_entries, parse_spec, parse_ws_text,
-        rainbow_colors, usage_bar_frame, usage_list_request_message, format_usage_log, alarm_phase, BlinkPhase,
-        FrameSender, UsageEntry, UsageProvider, WorkspaceStore, WsEvent, CHAR_UUID_STR, SERVICE_UUID_STR,
+        rainbow_colors, usage_bar_pixels, usage_list_request_message, format_usage_log, alarm_phase, BlinkPhase,
+        FrameSender, PermissionStore, UsageEntry, UsageProvider, WorkspaceStore, WsEvent, CHAR_UUID_STR, SERVICE_UUID_STR,
     };
     use anyhow::{anyhow, bail, Context, Result};
     use std::collections::HashMap;
@@ -1474,14 +1587,15 @@ mod winrt {
                         let _ = tcp.set_nonblocking(true);
                     }
 
-                    // Step 1-2 of the connection sequence: hello must be
-                    // the first message, then fetch_workspaces_request
-                    // (with subscribe) to get a snapshot and start the
-                    // workspace_update stream.
+                    // Hello must be first. Subscribe to workspace and agent
+                    // updates so status and permission LEDs stay current.
                     let sent_hello = socket.send(Message::text(hello_message().to_string())).is_ok();
                     let sent_fetch = sent_hello
                         && socket
                             .send(Message::text(fetch_workspaces_request_message(&next_request_id("fetch")).to_string()))
+                            .is_ok()
+                        && socket
+                            .send(Message::text(fetch_agents_request_message(&next_request_id("agents")).to_string()))
                             .is_ok();
 
                     if sent_fetch {
@@ -1635,6 +1749,7 @@ mod winrt {
         entries: Vec<UsageEntry>,
         cursor: usize,
         last_press_at: Instant,
+        rendered: bool,
     }
 
     struct AlarmState {
@@ -1647,33 +1762,34 @@ mod winrt {
     // ponytail: fixed 5s timeout for an interactive usage fetch: not
     // specified by the spec, chosen to be well above a local WS
     // round-trip; tune if the real daemon is slower than that.
-    const USAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
     const BACKGROUND_POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
     struct RunState {
         store: WorkspaceStore,
+        permissions: PermissionStore,
         foreground_is_paseo: bool,
         usage_cache: Option<(Instant, Vec<UsageProvider>)>,
         pending_usage: HashMap<String, UsagePurpose>,
-        awaiting_interactive: Option<Instant>,
         usage_mode: Option<UsageModeState>,
         alarm_baseline: HashMap<(String, String), f64>,
         last_bg_poll: Option<Instant>,
         alarm: Option<AlarmState>,
+        clear_before_normal: bool,
     }
 
     impl RunState {
         fn new() -> Self {
             Self {
                 store: WorkspaceStore::new(),
+                permissions: PermissionStore::default(),
                 foreground_is_paseo: false,
                 usage_cache: None,
                 pending_usage: HashMap::new(),
-                awaiting_interactive: None,
                 usage_mode: None,
                 alarm_baseline: HashMap::new(),
                 last_bg_poll: None,
                 alarm: None,
+                clear_before_normal: false,
             }
         }
     }
@@ -1711,12 +1827,14 @@ mod winrt {
             }
             WsEvent::WorkspaceUpsert(w) => state.store.apply_upsert(w, now),
             WsEvent::WorkspaceRemove(id) => state.store.apply_remove(&id),
+            WsEvent::AgentsSnapshot(entries) => state.permissions.apply_snapshot(entries),
+            WsEvent::AgentUpsert(agent) => state.permissions.apply_upsert(agent),
+            WsEvent::AgentRemove(id) => state.permissions.apply_remove(&id),
             WsEvent::UsageResponse { request_id, providers } => {
                 state.usage_cache = Some((now, providers.clone()));
                 let Some(purpose) = state.pending_usage.remove(&request_id) else { return };
                 match purpose {
                     UsagePurpose::Interactive => {
-                        state.awaiting_interactive = None;
                         enter_usage_mode_with(state, providers, now);
                     }
                     UsagePurpose::Background => {
@@ -1738,7 +1856,12 @@ mod winrt {
             return;
         }
         println!("{}", format_usage_log(&entries[0]));
-        state.usage_mode = Some(UsageModeState { entries, cursor: 0, last_press_at: now });
+        state.usage_mode = Some(UsageModeState {
+            entries,
+            cursor: 0,
+            last_press_at: now,
+            rendered: false,
+        });
     }
 
     fn check_alarm_crossings(state: &mut RunState, providers: &[UsageProvider], now: Instant) {
@@ -1759,12 +1882,13 @@ mod winrt {
         if let Some(mode) = &mut state.usage_mode {
             mode.cursor = (mode.cursor + 1) % mode.entries.len();
             mode.last_press_at = now;
+            mode.rendered = false;
             println!("{}", format_usage_log(&mode.entries[mode.cursor]));
             return;
         }
         match request_usage(state, UsagePurpose::Interactive, now, ws_cmd_tx) {
             Some(providers) => enter_usage_mode_with(state, providers, now),
-            None => state.awaiting_interactive = Some(now),
+            None => {}
         }
     }
 
@@ -1797,22 +1921,11 @@ mod winrt {
             return;
         }
 
-        if let Some(started) = state.awaiting_interactive {
-            if now.saturating_duration_since(started) >= USAGE_FETCH_TIMEOUT {
-                eprintln!("led-bridge: usage fetch timed out");
-                state.awaiting_interactive = None;
-                let pixels: Vec<(u8, u8, u8, u8)> = (0..10u8).map(|i| (i, 0xFF, 0x00, 0x00)).collect();
-                write_with_reconnect(ble, name_filter, &pixels);
-                std::thread::sleep(Duration::from_secs(1));
-                state.usage_mode = None;
-                frame_sender.reset();
-            }
-        }
-
         if let Some(mode) = &state.usage_mode {
             if now.saturating_duration_since(mode.last_press_at) >= USAGE_MODE_AUTO_EXIT {
                 state.usage_mode = None;
                 frame_sender.reset();
+                state.clear_before_normal = true;
             }
         }
 
@@ -1828,12 +1941,20 @@ mod winrt {
             }
         }
 
-        let desired = match &state.usage_mode {
-            Some(mode) => usage_bar_frame(mode.entries[mode.cursor].used_pct),
-            None => compute_status_frame(&state.store, state.foreground_is_paseo, now),
-        };
-        // Slot area is overridden by the usage bar; action/permission keys
-        // are already off in `usage_bar_frame`, matching the spec.
+        if let Some(mode) = &mut state.usage_mode {
+            if !mode.rendered {
+                let pixels = usage_bar_pixels(mode.entries[mode.cursor].used_pct);
+                write_with_reconnect(ble, name_filter, &pixels);
+                mode.rendered = true;
+            }
+            return;
+        }
+
+        let desired = compute_status_frame(&state.store, &state.permissions, state.foreground_is_paseo, now);
+        if state.clear_before_normal {
+            write_with_reconnect(ble, name_filter, &fill_all_pixels(0, 0, 0));
+            state.clear_before_normal = false;
+        }
 
         if let Some(pixels) = frame_sender.update(desired, now) {
             write_with_reconnect(ble, name_filter, &pixels);
@@ -2080,6 +2201,7 @@ mod tests {
             name: String::new(),
             pinned_at: Some(pinned_at.to_string()),
             archiving_at: None,
+            cwd: String::new(),
             status: status.to_string(),
         }
     }
@@ -2123,16 +2245,23 @@ mod tests {
     #[test]
     fn compute_status_frame_renders_slots_glow_and_actions() {
         let mut store = WorkspaceStore::new();
+        let mut permissions = PermissionStore::default();
         let now = Instant::now();
         // "a" pinned after "b" -> newest pin first: a = slot 0, b = slot 1.
         store.apply_upsert(ws("a", "2026-08-09T10:00:00Z", "running"), now);
         store.apply_upsert(ws("b", "2026-08-08T10:00:00Z", "needs_input"), now);
+        permissions.apply_upsert(AgentDescriptor {
+            id: "agent-b".to_string(),
+            workspace_id: Some("b".to_string()),
+            cwd: String::new(),
+            pending_permissions: vec![PendingPermissionDescriptor { kind: "tool".to_string() }],
+        });
 
-        let f = compute_status_frame(&store, true, now);
+        let f = compute_status_frame(&store, &permissions, true, now);
         assert_eq!(f[0], COLOR_RUNNING);
         assert_eq!(f[1], COLOR_NEEDS_INPUT);
         assert_eq!(f[2], COLOR_OFF);
-        // permission glow on: some slotted workspace needs input
+        // Permission glow on: a slotted agent has a real pending permission.
         assert_eq!(f[IDX_Y as usize], COLOR_PERMISSION_Y);
         assert_eq!(f[IDX_U as usize], COLOR_PERMISSION_U);
         // foreground is paseo: action indicators lit, F dim (nothing to do)
@@ -2141,16 +2270,19 @@ mod tests {
         assert_eq!(f[IDX_L as usize], COLOR_PR);
         assert_eq!(f[IDX_SEMI as usize], COLOR_MERGE);
         assert_eq!(f[IDX_F as usize], COLOR_FOCUS);
+        assert_eq!(f[IDX_D as usize], COLOR_CHAT);
 
         // not foreground: J/K/L/; off, F bright (call to action)
-        let f2 = compute_status_frame(&store, false, now);
+        let f2 = compute_status_frame(&store, &permissions, false, now);
         assert_eq!(f2[IDX_J as usize], COLOR_OFF);
         assert_eq!(f2[IDX_F as usize], COLOR_FOCUS);
+        assert_eq!(f2[IDX_D as usize], COLOR_OFF);
     }
 
     #[test]
     fn compute_status_frame_applies_blink_override() {
         let mut store = WorkspaceStore::new();
+        let permissions = PermissionStore::default();
         let t0 = Instant::now();
         // Establish prior status "running" first (the `now` passed here is
         // irrelevant: no transition into attention happens on this call).
@@ -2158,11 +2290,11 @@ mod tests {
         // Now transition into attention at t0: this is the one that blinks.
         store.apply_upsert(ws("a", "2026-08-09T10:00:00Z", "attention"), t0);
 
-        let f_on = compute_status_frame(&store, false, t0);
+        let f_on = compute_status_frame(&store, &permissions, false, t0);
         assert_eq!(f_on[0], COLOR_ATTENTION);
-        let f_off = compute_status_frame(&store, false, t0 + Duration::from_millis(400));
+        let f_off = compute_status_frame(&store, &permissions, false, t0 + Duration::from_millis(400));
         assert_eq!(f_off[0], COLOR_OFF);
-        let f_done = compute_status_frame(&store, false, t0 + Duration::from_secs(5));
+        let f_done = compute_status_frame(&store, &permissions, false, t0 + Duration::from_secs(5));
         assert_eq!(f_done[0], COLOR_ATTENTION);
     }
 
@@ -2171,27 +2303,43 @@ mod tests {
         // A workspace newly upserted straight into "attention" (no prior
         // status on record) must render solid, not blink.
         let mut store = WorkspaceStore::new();
+        let permissions = PermissionStore::default();
         let t0 = Instant::now();
         store.apply_upsert(ws("a", "2026-08-09T10:00:00Z", "attention"), t0);
         assert!(store.blink_started.get("a").is_none());
-        assert_eq!(compute_status_frame(&store, false, t0)[0], COLOR_ATTENTION);
-        assert_eq!(compute_status_frame(&store, false, t0 + Duration::from_millis(400))[0], COLOR_ATTENTION);
+        assert_eq!(compute_status_frame(&store, &permissions, false, t0)[0], COLOR_ATTENTION);
+        assert_eq!(compute_status_frame(&store, &permissions, false, t0 + Duration::from_millis(400))[0], COLOR_ATTENTION);
     }
 
     #[test]
     fn permission_glow_condition() {
         let mut store = WorkspaceStore::new();
+        let mut permissions = PermissionStore::default();
         let now = Instant::now();
-        assert!(!permission_glow(&store));
+        assert!(!permission_glow(&store, &permissions));
         store.apply_upsert(ws("a", "2026-08-09T10:00:00Z", "needs_input"), now);
-        assert!(permission_glow(&store));
+        assert!(!permission_glow(&store, &permissions));
+        permissions.apply_upsert(AgentDescriptor {
+            id: "question".to_string(),
+            workspace_id: Some("a".to_string()),
+            cwd: String::new(),
+            pending_permissions: vec![PendingPermissionDescriptor { kind: "question".to_string() }],
+        });
+        assert!(!permission_glow(&store, &permissions));
+        permissions.apply_upsert(AgentDescriptor {
+            id: "tool".to_string(),
+            workspace_id: Some("a".to_string()),
+            cwd: String::new(),
+            pending_permissions: vec![PendingPermissionDescriptor { kind: "tool".to_string() }],
+        });
+        assert!(permission_glow(&store, &permissions));
 
         // An unpinned (unslotted) workspace with needs_input must NOT glow.
         let mut store2 = WorkspaceStore::new();
         let mut unpinned = ws("b", "2026-08-09T10:00:00Z", "needs_input");
         unpinned.pinned_at = None;
         store2.apply_upsert(unpinned, now);
-        assert!(!permission_glow(&store2));
+        assert!(!permission_glow(&store2, &permissions));
     }
 
     // --- Usage bar ---
@@ -2208,29 +2356,22 @@ mod tests {
     }
 
     #[test]
-    fn segment_colors_by_band() {
-        assert_eq!(segment_color(1), COLOR_ATTENTION);
-        assert_eq!(segment_color(5), COLOR_ATTENTION);
-        assert_eq!(segment_color(6), COLOR_NEEDS_INPUT);
-        assert_eq!(segment_color(8), COLOR_NEEDS_INPUT);
-        assert_eq!(segment_color(9), COLOR_FAILED);
+    fn segment_colors_form_a_green_to_red_gradient() {
+        assert_eq!(segment_color(1), (0, 255, 0));
+        assert_ne!(segment_color(5), segment_color(6));
+        assert_ne!(segment_color(6), segment_color(8));
         assert_eq!(segment_color(10), COLOR_FAILED);
     }
 
     #[test]
-    fn usage_bar_frame_lights_number_row_and_leaves_rest_off() {
-        let f = usage_bar_frame(62.0);
-        // segments 1-5 (idx 0-4) green, segment 6 (idx 5) yellow, rest off.
-        for i in 0..5 {
-            assert_eq!(f[i], COLOR_ATTENTION);
-        }
-        assert_eq!(f[5], COLOR_NEEDS_INPUT);
-        for i in 6..10 {
-            assert_eq!(f[i], COLOR_OFF);
-        }
-        for i in 10..17 {
-            assert_eq!(f[i], COLOR_OFF);
-        }
+    fn usage_bar_paints_end_markers_and_lit_columns() {
+        let pixels = usage_bar_pixels(62.0);
+        assert_eq!(pixels.len(), 13);
+        assert_eq!(pixels[0], (FILL_ALL_INDEX, 0, 0, 0));
+        assert_eq!(pixels[1], (18, 0, 255, 0)); // fixed left green marker
+        assert_eq!(pixels[7], (24, 255, 227, 0)); // sixth lit segment
+        assert_eq!(pixels[8], (25, 0, 0, 0)); // seventh segment is unlit
+        assert_eq!(pixels[12], (29, 255, 0, 0)); // fixed right red marker
     }
 
     // --- Usage parsing / ordering ---
@@ -2281,7 +2422,7 @@ mod tests {
     }
 
     #[test]
-    fn usage_ordering_prefers_codex_session_and_appends_weekly_model_windows() {
+    fn usage_ordering_skips_codex_session_and_appends_weekly_model_windows() {
         let payload = json!({
             "providers": [
                 {
@@ -2313,7 +2454,6 @@ mod tests {
             vec![
                 ("claude", "five_hour"),
                 ("claude", "weekly"),
-                ("codex", "session"),
                 ("codex", "weekly"),
                 ("claude", "weekly_model_fable"),
             ]
@@ -2356,7 +2496,7 @@ mod tests {
     fn frame_diff_full_vs_incremental() {
         let mut a = off_frame();
         a[0] = (1, 2, 3);
-        assert_eq!(frame_diff(None, &a).len(), 17);
+        assert_eq!(frame_diff(None, &a).len(), 18);
         let mut b = a;
         b[5] = (9, 9, 9);
         let d = frame_diff(Some(&a), &b);
@@ -2374,7 +2514,7 @@ mod tests {
         // is true on the very first call (last_sent_at is None), so it sends
         // immediately as a full frame.
         let sent = fs.update(f, t0).expect("first update sends full frame");
-        assert_eq!(sent.len(), 17);
+        assert_eq!(sent.len(), 18);
 
         // No further change, well within repush interval: nothing to send.
         assert!(fs.update(f, t0 + Duration::from_millis(100)).is_none());
@@ -2389,7 +2529,7 @@ mod tests {
 
         // 30s later with no change: forced repush of the full frame.
         let sent3 = fs.update(f2, t0 + Duration::from_secs(31)).expect("repush");
-        assert_eq!(sent3.len(), 17);
+        assert_eq!(sent3.len(), 18);
     }
 
     #[test]
@@ -2400,7 +2540,7 @@ mod tests {
         fs.update(f, t0);
         fs.reset();
         let sent = fs.update(f, t0 + Duration::from_millis(1)).expect("full resend after reset");
-        assert_eq!(sent.len(), 17);
+        assert_eq!(sent.len(), 18);
     }
 
     // --- Foreground process match ---
@@ -2451,6 +2591,37 @@ mod tests {
             "type": "session",
             "message": {"type": "workspace_update", "payload": {"kind": "remove", "id": id}}
         })
+    }
+
+    fn fetch_agents_response_fixture() -> serde_json::Value {
+        json!({
+            "type": "session",
+            "message": {
+                "type": "fetch_agents_response",
+                "payload": {
+                    "requestId": "agents-1",
+                    "entries": [{
+                        "agent": {
+                            "id": "agent-1",
+                            "workspaceId": "ws-pinned",
+                            "cwd": "/repo",
+                            "pendingPermissions": [{"kind": "tool"}]
+                        }
+                    }]
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn parses_agent_permissions_for_the_led_glow() {
+        let events = parse_ws_value(&fetch_agents_response_fixture());
+        let [WsEvent::AgentsSnapshot(agents)] = events.as_slice() else {
+            panic!("expected AgentsSnapshot, got {events:?}");
+        };
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].workspace_id.as_deref(), Some("ws-pinned"));
+        assert_eq!(agents[0].pending_permissions[0].kind, "tool");
     }
 
     #[test]
@@ -2544,6 +2715,7 @@ mod tests {
     #[test]
     fn status_transition_drives_blink_end_to_end() {
         let mut store = WorkspaceStore::new();
+        let permissions = PermissionStore::default();
         let t0 = Instant::now();
 
         // Snapshot arrives with the workspace already at "attention" --
@@ -2554,7 +2726,7 @@ mod tests {
         entries[0].status = "attention".to_string(); // ws-pinned
         store.apply_snapshot(entries);
         assert!(store.blink_started.get("ws-pinned").is_none());
-        assert_eq!(compute_status_frame(&store, false, t0)[0], COLOR_ATTENTION);
+        assert_eq!(compute_status_frame(&store, &permissions, false, t0)[0], COLOR_ATTENTION);
 
         // A workspace_update transitions it away, then back into attention:
         // that second transition is a real one and starts a blink.
@@ -2569,8 +2741,8 @@ mod tests {
         )).remove(0) else { panic!("expected upsert") };
         store.apply_upsert(attention, t0);
         assert_eq!(store.blink_started.get("ws-pinned"), Some(&t0));
-        assert_eq!(compute_status_frame(&store, false, t0)[0], COLOR_ATTENTION);
-        assert_eq!(compute_status_frame(&store, false, t0 + Duration::from_millis(400))[0], COLOR_OFF);
+        assert_eq!(compute_status_frame(&store, &permissions, false, t0)[0], COLOR_ATTENTION);
+        assert_eq!(compute_status_frame(&store, &permissions, false, t0 + Duration::from_millis(400))[0], COLOR_OFF);
     }
 
     #[test]
@@ -2594,6 +2766,11 @@ mod tests {
         assert_eq!(inner["sort"][0]["direction"], "desc");
         assert_eq!(inner["page"]["limit"], 200);
         assert!(inner["subscribe"].is_object());
+
+        let agents_req = fetch_agents_request_message("agents");
+        assert_eq!(agents_req["message"]["type"], "fetch_agents_request");
+        assert_eq!(agents_req["message"]["page"]["limit"], 200);
+        assert!(agents_req["message"]["subscribe"].is_object());
 
         let usage_req = usage_list_request_message("xyz");
         assert_eq!(usage_req["type"], "session");

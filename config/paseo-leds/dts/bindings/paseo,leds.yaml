@@ -7,8 +7,8 @@ description: |
   Logical index 0-4 = left-half keys 1-5, logical index 5-9 (array index
   0-4 in right-number-row-indices) = right-half keys 6,7,8,9,0, logical
   index 10-15 (array index 0-5 in right-extra-indices, order Y U J K L
-  SEMI) = right-half home-row action keys, logical index 16 (the single
-  entry in left-extra-indices) = left-half F. Index 0xFE in a frame/
+  SEMI) = right-half home-row action keys, logical indices 16-17 (the two
+  entries in left-extra-indices) = left-half F and D. Index 0xFE in a frame/
   behavior-invocation pixel entry is not a logical index at all -- it's
   the fill-all sentinel (see paseo_leds.c) and doesn't consult either
   table.
@@ -23,7 +23,7 @@ description: |
   on hardware. Kept as a devicetree property (rather than hardcoded in C)
   specifically so it's a one-line fix here after on-hardware testing.
 
-  left-extra-indices / right-extra-indices extend the same lookup to F
+  left-extra-indices / right-extra-indices extend the same lookup to F/D
   (left) and Y, U, J, K, L, SEMI (right) -- see paseo_leds.c for the full
   column-arithmetic derivation. left-extra-indices is read directly off
   the same hardware-verified left-half grid as left-number-row-indices
