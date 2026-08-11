@@ -25,8 +25,12 @@ if (-not (Test-Path $src)) { throw "paseo-led-bridge.exe not found next to this 
 $task = Get-ScheduledTask -TaskName "PaseoLedBridge" -ErrorAction SilentlyContinue
 if ($task) {
     Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 250
 }
+# The task launches the bridge through wscript.exe. Stopping wscript does not
+# always stop that child process, so end the old bridge before replacing it.
+Get-Process -Name "paseo-led-bridge" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 250
 
 $dir = Join-Path $env:LOCALAPPDATA "PaseoLedBridge"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
