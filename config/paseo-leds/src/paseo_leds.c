@@ -82,10 +82,16 @@ LOG_MODULE_REGISTER(paseo_leds, CONFIG_ZMK_LOG_LEVEL);
 #define PASEO_LEDS_CHRC_UUID                                                                      \
     BT_UUID_128_ENCODE(0x70617365, 0x6f4c, 0x4544, 0xb0a0, 0x000000000002)
 
-/* Logical indices 0-16: 0-4 left number row, 5-9 right number row, 10-15
- * right home-row action keys (Y U J K L SEMI), 16 left home-row F. */
-#define PASEO_LEDS_NUM_LOGICAL 17
-/* 17 logical entries + 1 optional fill-all entry per frame. */
+/* Logical indices 0-17: 0-4 left number row, 5-9 right number row, 10-15
+ * right home-row action keys (Y U J K L SEMI), 16-17 left home-row F D.
+ * Indices 18-29 are full keyboard columns, left to right. They are used by
+ * the usage display: =, 1-5, 6-0, -. */
+#define PASEO_LEDS_NUM_LOGICAL 30
+#define PASEO_LEDS_USAGE_COLUMN_FIRST 18
+#define PASEO_LEDS_USAGE_COLUMN_COUNT 12
+#define PASEO_LEDS_USAGE_RIGHT_FIRST 24
+#define PASEO_LEDS_UNUSED_PIXEL 0xFFu
+/* A normal 17-key frame plus one optional fill-all entry per frame. */
 #define PASEO_LEDS_MAX_PIXELS 18
 
 /* Packed-pixel sentinel meaning "no second pixel this behavior call". */
@@ -114,6 +120,29 @@ static void paseo_leds_set_local_pixel(uint8_t strip_idx, uint8_t r, uint8_t g, 
 static void paseo_leds_fill_local(uint8_t r, uint8_t g, uint8_t b) {
     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
         strip_pixels[i] = (struct led_rgb){.r = r, .g = g, .b = b};
+    }
+}
+
+/* The left strip layout is documented by go60_lh.dts. The right half mirrors
+ * this order, as the existing right number-row mapping does. */
+static const uint8_t paseo_leds_column_pixels[6][6] = {
+    {26, 27, 28, 29, PASEO_LEDS_UNUSED_PIXEL, PASEO_LEDS_UNUSED_PIXEL},
+    {22, 23, 24, 25, PASEO_LEDS_UNUSED_PIXEL, PASEO_LEDS_UNUSED_PIXEL},
+    {17, 18, 19, 20, 21, PASEO_LEDS_UNUSED_PIXEL},
+    {12, 13, 14, 15, 16, PASEO_LEDS_UNUSED_PIXEL},
+    {7, 8, 9, 10, 11, 0},
+    {3, 4, 5, 6, 1, 2},
+};
+
+static void paseo_leds_set_local_column(uint8_t column, uint8_t r, uint8_t g, uint8_t b) {
+    if (column >= ARRAY_SIZE(paseo_leds_column_pixels)) {
+        return;
+    }
+    for (size_t i = 0; i < ARRAY_SIZE(paseo_leds_column_pixels[column]); i++) {
+        uint8_t strip_idx = paseo_leds_column_pixels[column][i];
+        if (strip_idx != PASEO_LEDS_UNUSED_PIXEL) {
+            paseo_leds_set_local_pixel(strip_idx, r, g, b);
+        }
     }
 }
 
@@ -321,45 +350,42 @@ void paseo_leds_toggle(void) {
  *   N1(col1)=22 N2(col2)=17 N3(col3)=12 N4(col4)=7 N5(col5)=3
  * This is read directly off the documented comment, not a guess.
  *
- * F (left-extra-indices, logical 16): "mo A S D F G" is row 2, columns
+ * F/D (left-extra-indices, logical 16/17): "mo A S D F G" is row 2, columns
  * 0-5 -> mo=col0 A=col1 S=col2 D=col3 F=col4 G=col5. Row 2 col4 = 9.
  */
 static const uint8_t left_number_row_indices[] = DT_PROP(PASEO_LEDS_CFG, left_number_row_indices);
 static const uint8_t left_extra_indices[] = DT_PROP(PASEO_LEDS_CFG, left_extra_indices);
 
 BUILD_ASSERT(ARRAY_SIZE(left_number_row_indices) == 5, "expected 5 left number-row indices");
-BUILD_ASSERT(ARRAY_SIZE(left_extra_indices) == 1, "expected 1 left extra index (F)");
+BUILD_ASSERT(ARRAY_SIZE(left_extra_indices) == 2, "expected 2 left extra indices (F D)");
 
 struct paseo_leds_pixel {
     uint8_t index;
     uint8_t r, g, b;
 };
 
-/* ponytail: single staging buffer, no lock/double-buffer between the BT RX
- * callback (paseo_leds_write) and the work queue (paseo_leds_apply_frame).
- * Fine for a spike at human/bridge-driven frame rates; add a spinlock or
- * double buffer if frames start arriving faster than the work item drains
- * them. */
-static struct {
+struct paseo_leds_frame {
     uint8_t count;
     struct paseo_leds_pixel pixels[PASEO_LEDS_MAX_PIXELS];
-} pending_frame;
+};
+
+/* ponytail: six queued writes cover one complete host repaint (five normal
+ * chunks or four usage-column chunks). Add acknowledgements only if a faster
+ * sender makes this queue overflow. */
+K_MSGQ_DEFINE(paseo_leds_frames, sizeof(struct paseo_leds_frame), 6, 4);
 
 static uint32_t paseo_leds_pack(const struct paseo_leds_pixel *px) {
     return ((uint32_t)px->index << 24) | ((uint32_t)px->r << 16) | ((uint32_t)px->g << 8) | px->b;
 }
 
-static void paseo_leds_apply_frame(struct k_work *work) {
-    ARG_UNUSED(work);
-
-    paseo_leds_power_on();
+static void paseo_leds_apply_one_frame(const struct paseo_leds_frame *frame) {
 
     bool left_dirty = false;
     uint32_t right_packed[PASEO_LEDS_MAX_PIXELS];
     size_t right_count = 0;
 
-    for (int i = 0; i < pending_frame.count; i++) {
-        struct paseo_leds_pixel *px = &pending_frame.pixels[i];
+    for (int i = 0; i < frame->count; i++) {
+        const struct paseo_leds_pixel *px = &frame->pixels[i];
 
         if (px->index == PASEO_LEDS_FILL_ALL) {
             /* Fill+flush this half immediately (own 30 pixels), then
@@ -370,11 +396,14 @@ static void paseo_leds_apply_frame(struct k_work *work) {
             paseo_leds_fill_local(px->r, px->g, px->b);
             paseo_leds_flush();
             right_packed[right_count++] = paseo_leds_pack(px);
+        } else if (px->index >= PASEO_LEDS_USAGE_COLUMN_FIRST && px->index < PASEO_LEDS_USAGE_RIGHT_FIRST) {
+            paseo_leds_set_local_column(px->index - PASEO_LEDS_USAGE_COLUMN_FIRST, px->r, px->g, px->b);
+            left_dirty = true;
         } else if (px->index < 5) {
             paseo_leds_set_local_pixel(left_number_row_indices[px->index], px->r, px->g, px->b);
             left_dirty = true;
-        } else if (px->index == 16) {
-            paseo_leds_set_local_pixel(left_extra_indices[0], px->r, px->g, px->b);
+        } else if (px->index == 16 || px->index == 17) {
+            paseo_leds_set_local_pixel(left_extra_indices[px->index - 16], px->r, px->g, px->b);
             left_dirty = true;
         } else if (px->index < PASEO_LEDS_NUM_LOGICAL) {
             /* Right-owned (5-9 number row, 10-15 extra): pack for the
@@ -407,6 +436,16 @@ static void paseo_leds_apply_frame(struct k_work *work) {
     }
 }
 
+static void paseo_leds_apply_frame(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    struct paseo_leds_frame frame;
+    paseo_leds_power_on();
+    while (k_msgq_get(&paseo_leds_frames, &frame, K_NO_WAIT) == 0) {
+        paseo_leds_apply_one_frame(&frame);
+    }
+}
+
 static K_WORK_DEFINE(apply_frame_work, paseo_leds_apply_frame);
 
 /*
@@ -414,7 +453,8 @@ static K_WORK_DEFINE(apply_frame_work, paseo_leds_apply_frame);
  *   byte 0 = pixel count n (1-18)
  *   then n * 4 bytes: [logical_index, r, g, b]
  * Logical index 0-9 = number keys 1,2,3,4,5,6,7,8,9,0. Logical index
- * 10-15 = Y,U,J,K,L,SEMI. Logical index 16 = F. Index byte 0xFE is the
+ * 10-15 = Y,U,J,K,L,SEMI. Logical indices 16-17 = F,D. Logical indices 18-29 set
+ * whole keyboard columns (=, 1-5, 6-0, -). Index byte 0xFE is the
  * fill-all sentinel (see module comment), not a logical index -- it may
  * appear at most meaningfully once per frame but nothing stops a second
  * one; both would just be applied and flushed in order like any other
@@ -442,10 +482,10 @@ static ssize_t paseo_leds_write(struct bt_conn *conn, const struct bt_gatt_attr 
     }
 
     /* Copy only -- never do BLE/strip work from this callback. */
-    pending_frame.count = n;
+    struct paseo_leds_frame frame = {.count = n};
     for (int i = 0; i < n; i++) {
         const uint8_t *entry = &data[1 + i * 4];
-        pending_frame.pixels[i] = (struct paseo_leds_pixel){
+        frame.pixels[i] = (struct paseo_leds_pixel){
             .index = entry[0],
             .r = entry[1],
             .g = entry[2],
@@ -453,6 +493,10 @@ static ssize_t paseo_leds_write(struct bt_conn *conn, const struct bt_gatt_attr 
         };
     }
 
+    if (k_msgq_put(&paseo_leds_frames, &frame, K_NO_WAIT) != 0) {
+        LOG_WRN("LED frame queue full, dropping frame");
+        return BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES);
+    }
     k_work_submit(&apply_frame_work);
 
     return len;
@@ -513,16 +557,22 @@ static void paseo_leds_apply_packed(uint32_t packed) {
         return;
     }
 
-    /* Right-owned is 5-9 (number row) and 10-15 (Y U J K L SEMI); 16 (F)
-     * is left-owned and must never reach the peripheral, so it's excluded
-     * here just like anything >= PASEO_LEDS_NUM_LOGICAL. */
-    bool right_owned = index >= 5 && index < 16;
+    /* Right-owned is 5-9 (number row), 10-15 (Y U J K L SEMI), and usage
+     * columns 24-29 (6-0, -). 16-17 (F/D) and columns 18-23 are left-owned. */
+    bool right_owned = (index >= 5 && index < 16)
+        || (index >= PASEO_LEDS_USAGE_RIGHT_FIRST && index < PASEO_LEDS_NUM_LOGICAL);
     if (!right_owned) {
         LOG_WRN("Ignoring out-of-range/left-owned logical index %d on peripheral", index);
         return;
     }
 
-    if (index < 10) {
+    if (index >= PASEO_LEDS_USAGE_RIGHT_FIRST) {
+        /* The right half is mirrored: 6 is the leftmost right-side column,
+         * so it uses the left layout's column 5; - uses column 0. */
+        paseo_leds_set_local_column(
+            PASEO_LEDS_USAGE_COLUMN_FIRST + PASEO_LEDS_USAGE_COLUMN_COUNT - 1 - index,
+            r, g, b);
+    } else if (index < 10) {
         uint8_t right_slot = index - 5;
         if (right_slot < ARRAY_SIZE(right_number_row_indices)) {
             paseo_leds_set_local_pixel(right_number_row_indices[right_slot], r, g, b);

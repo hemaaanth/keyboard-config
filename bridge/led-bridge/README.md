@@ -11,8 +11,9 @@ keyboard.
 - Write characteristic UUID: `70617365-6f4c-4544-b0a0-000000000002` (write-without-response)
 - Frame: byte 0 = pixel count `n`, then `n` × 4 bytes `[logical_index, r, g, b]`.
   - Logical index 0-9 = number-row keys `1 2 3 4 5 6 7 8 9 0`.
-  - Logical index 10-16 = `Y U J K L ; F`.
-  - Frames may contain up to 17 pixel entries.
+  - Logical index 10-17 = `Y U J K L ; F D`.
+  - Logical index 18-29 = full columns `= 1 2 3 4 5 6 7 8 9 0 -`.
+  - Frames may contain up to 18 pixel entries.
   - Index byte `0xFE` is the **fill-all** op: sets all 30 LEDs on both
     halves to that r,g,b. Later entries in the same frame layer on top of
     it (so `[0xFE=red, 3=blue]` means "all red except key 4").
@@ -134,6 +135,7 @@ the exe, re-run the installer to refresh the local copy.
 | `L` | 14 | open PR (Paseo foreground only) | `#A020F0` / off |
 | `;` | 15 | merge (Paseo foreground only) | `#FF2000` / off |
 | `F` | 16 | focus (Paseo foreground only) | `#202020` / off |
+| `D` | 17 | focus chat input (Paseo foreground only) | `#FFE000` / off |
 
 Slot derivation: slots 1-10 = workspaces with a non-null `pinnedAt` and a
 null `archivingAt`, sorted by `pinnedAt` descending (newest pin = slot 1 =
@@ -159,8 +161,9 @@ green. A workspace that simply *appears* already at `attention` (a fresh
 snapshot, a newly-pinned workspace, a reconnect) renders solid immediately
 — no blink.
 
-Permission glow (feature 4): `Y`/`U` light together whenever *any slotted*
-workspace is `needs_input`, independent of window focus.
+Permission glow (feature 4): `Y`/`U` light together only when a slotted
+agent has a pending permission that is not a question. They stay off for
+agent questions, even though those also set the workspace to `needs_input`.
 
 Foreground action indicators (feature 3): `J K L ; F` only light while the
 foreground window's owning process image ends with `Paseo.exe`
@@ -169,13 +172,15 @@ foreground window's owning process image ends with `Paseo.exe`
 #### Usage-bar mode (feature 5)
 
 Global hotkey **Shift+F17**. First press fetches usage over the existing
-WS connection (`provider.usage.list.request` / cached 60s) and renders the
-first tracked window as a 10-segment bar across the number row (`1..9,0`):
-key *n* lit iff usedPct ≥ n×10 (minimum 1 segment if >0%); segments 1-5
-green, 6-8 yellow, 9-10 red. Action/permission keys go dark while in this
-mode. Tracked windows, in display order (absent ones skipped): Claude
-`five_hour`, Claude `weekly`, Codex `weekly`. Each further press cycles to
-the next tracked window and logs it, e.g.:
+WS connection (`provider.usage.list.request` / cached 60s) and clears the
+keyboard for a 12-column display: `=` is a fixed green marker, `1..0` are
+the ten usage columns, and `-` is a fixed red marker. Each used column has
+its own color in a continuous green → yellow → orange → red gradient. All
+columns stay solid. The normal Paseo display
+returns six seconds after the last press. Tracked windows, in display order
+(absent ones skipped): Claude `five_hour`, Claude `weekly`, Codex `weekly`,
+then Claude `weekly_model*` windows. Each further press cycles to the next
+tracked window and logs it, e.g.:
 ```
 usage: claude five_hour 62% (resets 2026-08-10T18:00:00Z)
 ```
@@ -194,7 +199,7 @@ still be active).
 
 #### Debounce / dedupe / repush
 
-All 17 pixels go through one `FrameSender`: state changes are debounced
+The normal 17 status pixels go through one `FrameSender`: state changes are debounced
 (~60ms) into a single write, unchanged pixels are dropped from that write,
 and a full frame is force-resent every 30s regardless of change (in case
 the firmware missed a write or reset). Usage-bar and alarm frames
@@ -271,7 +276,7 @@ rebuild per the protocol above), rather than exiting.
 
 ## Firmware compatibility
 
-`run` assumes firmware that understands logical indices 0-16, frames up to
-17 pixels, and the `0xFE` fill-all op. **The Go60 must be flashed with a
+`run` assumes firmware that understands logical indices 0-29, frames up to
+18 pixels, and the `0xFE` fill-all op. **The Go60 must be flashed with a
 matching firmware build** — an older firmware that only understands 10
 pixels (indices 0-9) will silently ignore or mishandle the extra bytes.

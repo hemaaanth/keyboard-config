@@ -107,7 +107,7 @@
     // that pattern (right half -- unverified, see
     // config/paseo-leds/src/paseo_leds.c for the full derivation).
     // left-number-row-indices / right-number-row-indices are
-    // HARDWARE-VERIFIED -- do not change. left-extra-indices (order: F)
+    // HARDWARE-VERIFIED -- do not change. left-extra-indices (order: F D)
     // and right-extra-indices (order: Y U J K L SEMI) extend the same
     // grid; correct the right-half array after on-hardware testing if the
     // wrong keys light up (see paseo_leds.c's derivation comment).
@@ -115,7 +115,7 @@
         compatible = "paseo,leds";
         left-number-row-indices = <22 17 12 7 3>;
         right-number-row-indices = <3 7 12 17 22>;
-        left-extra-indices = <9>;
+        left-extra-indices = <9 14>;
         right-extra-indices = <4 8 9 14 19 24>;
     };
 
@@ -253,6 +253,7 @@
             // for the AutoHotkey bridge (bridge/paseo-deck.ahk):
             //   1-0        -> F13-F22   jump to Paseo workspace slot 1-10
             //   Y / U      -> F23/F24   approve / deny pending permission
+            //   D          -> Ctrl+L focus Paseo chat input
             //   H          -> Shift+F17 usage-bar hotkey for the host bridge
             //   J/K/L/;    -> Shift+F13/F14/F15/F16  commit/push/pr/merge
             //   F          -> Shift+F24 focus the Paseo window
@@ -262,7 +263,7 @@
             bindings = <
 &none  &kp F13      &kp F14      &kp F15  &kp F16      &kp F17                                            &kp F18      &kp F19      &kp F20      &kp F21      &kp F22  &none
 &none  &kp LS(F20)  &kp LS(F18)  &none    &none        &plt                                               &kp F23      &kp F24      &none        &none        &none    &none
-&none  &kp LS(F21)  &kp LS(F19)  &none    &kp LS(F24)  &none                                              &kp LS(F17)  &kp LS(F13)  &kp LS(F14)  &kp LS(F15)  &kp LS(F16)  &none
+&none  &kp LS(F21)  &kp LS(F19)  &kp LC(L) &kp LS(F24)  &none                                              &kp LS(F17)  &kp LS(F13)  &kp LS(F14)  &kp LS(F15)  &kp LS(F16)  &none
 &none  &none    &none    &none    &none        &none                                                      &none        &none        &none        &none        &none    &none
                 &none    &none    &none                                                                                &none        &none        &none
                                                             &none  &none  &none  &none  &none  &none

@@ -50,6 +50,7 @@ back to white once read) · **red** error.
 | `1`–`0` | Jump to workspace slot 1–10 |
 | `Y` / `U` | Approve / deny a pending permission (they glow yellow/red when one is waiting) |
 | `J` `K` `L` `;` | Commit / push / PR / merge on the active slot (lit in unique colors while Paseo is focused) |
+| `D` | Focus the Paseo chat input (yellow while Paseo is focused) |
 | `F` | Focus the Paseo window (always-on white beacon) |
 | `H` | Usage bar: number row shows Claude 5h → Claude weekly → Codex usage as a 10-segment green→red bar |
 | `W` / `S` | Thinking effort up / down |

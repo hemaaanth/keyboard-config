@@ -18,6 +18,7 @@ held. The Mac layer is untouched (Paseo runs on the Windows side).
 | `Y` | F23 | Approve pending permission |
 | `U` | F24 | Deny pending permission |
 | `H` | Shift+F17 | Usage-bar hotkey for the host bridge |
+| `D` | Ctrl+L | Focus Paseo's chat input |
 | `J` | Shift+F13 | Commit on the active slot's agent |
 | `K` | Shift+F14 | Push |
 | `L` | Shift+F15 | Open PR |
@@ -52,17 +53,18 @@ peripheral over the split link.
 | 13 | K | right |
 | 14 | L | right |
 | 15 | `;` | right |
-| 16 | F | left |
+| 16–17 | F D | left |
+| 18–29 | `=` `1`–`5` `6`–`0` `-` | full keyboard columns, left to right |
 
 `left-number-row-indices` / `right-number-row-indices` (config/go60.keymap's
 `paseo_leds` node) are hardware-verified — do not change. `left-extra-indices`
-(order: F) and `right-extra-indices` (order: Y U J K L `;`) extend the same
-lookup for the new logical indices 10–16; derivation (from the documented
+(order: F D) and `right-extra-indices` (order: Y U J K L `;`) extend the same
+lookup for the new logical indices 10–17; derivation (from the documented
 left-half strip grid in `config/paseo-leds/src/paseo_leds.c`):
 
-- **F** = row 2 ("mo A S D F G"), column 4 → strip index 9. Read directly
-  off the hardware-verified left-half grid, same certainty as the number
-  row.
+- **F** = row 2 ("mo A S D F G"), column 4 → strip index 9. **D** = row 2,
+  column 3 → strip index 14. Both come directly from the hardware-verified
+  left-half grid.
 - **Y** = right row 1 ("Y U I O P ESC"), column 1 → mirrors left row 1
   column 5 (index 4). **U** = column 2 → mirrors left column 4 (index 8).
 - **J** = right row 2 ("H J K L ; '"), column 2 → mirrors left row 2
