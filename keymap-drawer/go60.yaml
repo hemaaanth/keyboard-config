@@ -58,7 +58,7 @@ layers:
   - $$mdi:apple-keyboard-control$$
   - {t: '$$mdi:backspace$$', type: backspace}
   - Paseo
-  - Hyper+F5
+  - '&mic_ptt'
   - {t: '$$mdi:keyboard-return$$', h: Fn}
   - $$mdi:keyboard-space$$
   Mac:

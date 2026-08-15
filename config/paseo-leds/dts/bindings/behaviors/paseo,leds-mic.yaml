@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+
+description: Global push-to-talk LED overlay for the right thumb key.
+
+compatible: "paseo,leds-mic"
+
+include: zero_param.yaml

@@ -287,6 +287,11 @@ static struct led_rgb paseo_leds_scale_pixel(struct led_rgb px, uint8_t brt, uin
  * Frame/behavior-invocation handlers always update strip_pixels; only this
  * flush function is gated on it. */
 static bool paseo_leds_enabled = true;
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static bool paseo_leds_mic_active;
+BUILD_ASSERT(DT_PROP(PASEO_LEDS_CFG, right_mic_index) < STRIP_NUM_PIXELS,
+             "right-mic-index is outside the LED strip");
+#endif
 
 static void paseo_leds_flush(void) {
     if (!paseo_leds_enabled) {
@@ -306,10 +311,27 @@ static void paseo_leds_flush(void) {
         scaled[i] = paseo_leds_scale_pixel(strip_pixels[i], brt, sat);
     }
 
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (paseo_leds_mic_active) {
+        scaled[DT_PROP(PASEO_LEDS_CFG, right_mic_index)] =
+            paseo_leds_scale_pixel((struct led_rgb){.r = 255}, brt, sat);
+    }
+#endif
+
     int err = led_strip_update_rgb(led_strip, scaled, STRIP_NUM_PIXELS);
     if (err < 0) {
         LOG_ERR("led_strip_update_rgb failed (%d)", err);
     }
+}
+
+void paseo_leds_mic_set(bool active) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    ARG_UNUSED(active);
+#else
+    paseo_leds_mic_active = active;
+    paseo_leds_power_on();
+    paseo_leds_flush();
+#endif
 }
 
 /* Flips paseo_leds_enabled -- see paseo_leds_shared.h for the contract. */

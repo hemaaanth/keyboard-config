@@ -10,9 +10,15 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 /* Flips paseo_leds_enabled. On disable, blanks the strip once (writes off
  * pixels straight to hardware; the stored pixel buffer is untouched). On
  * re-enable, flushes the stored buffer immediately (through the normal
  * brightness/saturation-scaling flush path). Safe to call from either
  * split role. */
 void paseo_leds_toggle(void);
+
+/* Overlays red on the right-hand push-to-talk key while active. The
+ * underlying host-driven pixel stays untouched and is revealed on release. */
+void paseo_leds_mic_set(bool active);

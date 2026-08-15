@@ -46,3 +46,7 @@ properties:
   right-extra-indices:
     type: array
     required: true
+  right-mic-index:
+    type: int
+    required: true
+    description: Right strip index for the inner push-to-talk thumb key.
