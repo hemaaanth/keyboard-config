@@ -1,71 +1,98 @@
-# Paseo Deck (Phase 1)
+# BB Deck on Omarchy
 
-Phase 1 of the Go60 ↔ Paseo integration: a MoErgo Go60 "Paseo layer" emits
-F13-F24 as global hotkeys. A Windows AutoHotkey v2 script catches them,
-focuses the Paseo desktop app, and delegates agent actions to a bash helper
-running inside WSL that drives the `paseo` CLI.
+The Go60's Agent Deck layer emits F13–F24. Omarchy/Hyprland catches those
+otherwise-unused keys and routes them through `bb-deck`, while
+`bb-led-bridge` mirrors Status Sidebar thread state to the keyboard over the
+existing custom Bluetooth GATT service. Slot order comes from the installed
+`status-sidebar` plugin's status-first model.
 
-```
-Go60 (ZMK) --F13-F24--> Windows (AHK v2) --wsl.exe--> bash helper --> paseo CLI
-```
+## Install
 
-## Hotkey table
+The Go60 must already be paired in Linux Bluetooth settings and bb must be
+running on its normal loopback address (`http://127.0.0.1:38886`). Then:
 
-| Key       | Action                                              |
-|-----------|------------------------------------------------------|
-| F13-F21   | Jump to Paseo workspace slot 1-9 (Ctrl+1..9)          |
-| F22       | Focus Paseo, select slot 10 (no keystroke sent — Ctrl+0 is zoom reset) |
-| F23       | Approve the pending permission for the active slot    |
-| F24       | Deny the pending permission for the active slot       |
-| Shift+F13 | Commit on the active slot's agent                     |
-| Shift+F14 | Push on the active slot's agent                       |
-| Shift+F15 | Open a PR on the active slot's agent                  |
-| Shift+F16 | Merge the open PR on the active slot's agent           |
-| Shift+F24 | Focus Paseo only                                       |
-| Shift+F18/F19 | Thinking effort up / down on the active slot's agent |
-| Shift+F20/F21 | Mode up (toward bypass) / down (toward plan)         |
-
-"Active slot" is whichever F13-F22 key was pressed most recently.
-
-## Install (Windows)
-
-1. Install [AutoHotkey v2](https://www.autohotkey.com/).
-2. Open `paseo-deck.ahk` and check the `HelperPath` variable at the top — it
-   defaults to `/home/system/Documents/Development/keyboard-config/bridge/paseo-deck.sh`.
-   Adjust it if this repo lives somewhere else inside WSL.
-3. Run `paseo-deck.ahk` (double-click, or `AutoHotkey64.exe paseo-deck.ahk`).
-4. For autostart: press Win+R, run `shell:startup`, and drop a shortcut to
-   `paseo-deck.ahk` in the folder that opens.
-
-## Test
-
-Before wiring up the keyboard, run the smoke test inside WSL:
-
-```
-bridge/paseo-deck-test.sh
+```bash
+bridge/install-omarchy.sh
 ```
 
-It only calls read-only `paseo` commands (`workspace ls`, `agent ls`,
-`permit ls`, and `resolve`) and never touches `permit allow/deny` or
-`agent send`. It should print `ALL PASS` and exit 0.
+Add these bindings to `~/.config/hypr/bindings.lua`:
 
-Once that passes, program F13-F24 on the Go60 (see
-`../docs/go60-paseo-layer.md`) and press the keys — each press should show a
-tray notification with the result.
+```lua
+-- Go60 Agent Deck: raw XKB codes 191-202 are F13-F24. Raw codes are
+-- intentional: symbolic F13-F24 bindings are unreliable for this BLE HID.
+o.bind("code:191", "BB thread slot 1", "bb-deck slot 1")
+o.bind("code:192", "BB thread slot 2", "bb-deck slot 2")
+o.bind("code:193", "BB thread slot 3", "bb-deck slot 3")
+o.bind("code:194", "BB thread slot 4", "bb-deck slot 4")
+o.bind("code:195", "BB thread slot 5", "bb-deck slot 5")
+o.bind("code:196", "BB thread slot 6", "bb-deck slot 6")
+o.bind("code:197", "BB thread slot 7", "bb-deck slot 7")
+o.bind("code:198", "BB thread slot 8", "bb-deck slot 8")
+o.bind("code:199", "BB thread slot 9", "bb-deck slot 9")
+o.bind("code:200", "BB thread slot 10", "bb-deck slot 10")
+o.bind("SHIFT + code:191", "Ask BB to commit", "bb-deck action commit")
+o.bind("SHIFT + code:192", "Ask BB to push", "bb-deck action push")
+o.bind("SHIFT + code:193", "Ask BB to open a PR", "bb-deck action pr")
+o.bind("SHIFT + code:194", "Ask BB to merge", "bb-deck action merge")
+o.bind("SHIFT + code:201", "Focus BB composer", "bb-deck composer")
+o.bind("SHIFT + code:202", "Focus BB", "bb-deck focus")
+```
 
-## Troubleshooting
+Hyprland switches to the workspace containing bb when `bb-deck focus` runs.
+If the web app is closed, Omarchy launches it at the configured local bb URL.
+After editing the bindings, validate them:
 
-- Check `paseo-deck.log` next to the `.ahk` script for a timestamped history
-  of every helper invocation and its result.
-- `wsl.exe` must resolve on PATH and the default WSL distro must be the one
-  with the `paseo` daemon and this repo.
-- The Paseo daemon must be running (`paseo workspace ls` should work from a
-  WSL shell).
-- A `busy` tray tip means a previous key press is still in flight — actions
-  are single-flight and dropped, not queued, so just press again.
+```bash
+hyprctl reload
+hyprctl configerrors
+```
 
-## Phase 2
+`D` changed from `Ctrl+L` to `Shift+F23`, so flash the current
+`config/go60.keymap` build before expecting the composer shortcut to work.
 
-Phase 2 replaces the WSL-CLI hop with a native Windows bridge and adds BLE
-status LEDs on the Go60 for agent state (running/idle/error/permission
-pending) instead of relying on tray notifications alone.
+## Slots and colors
+
+The first ten Status Sidebar rows map directly to the number row and the
+F13–F22 slot shortcuts. The bridge reproduces the sidebar's section order
+(`Active`, `Needs input`, `Idle`, `Later`, `Archived`), pinned-first sorting
+inside each section, and environment/worktree grouping. `Later` placement is
+read from the status-sidebar plugin itself. Run `bb-deck slots` to print the
+current physical mapping.
+
+| Color | bb state |
+|---|---|
+| dim white | idle and read |
+| blue | runtime, workflow, background agent/command, plan, or goal active |
+| yellow | pending question, approval, or permission |
+| green | finished attention that has not been read |
+| red | error |
+
+`Y` and `U` are unassigned. The `F` LED is a dim always-on locator for the focus shortcut. `bb-led-bridge`
+subscribes to bb's `/ws` thread-list changes and status-sidebar's `Later`
+signal; a 30-second full refresh recovers missed BLE writes.
+
+## Commands and diagnostics
+
+```bash
+systemctl --user status bb-led-bridge
+journalctl --user -u bb-led-bridge -f
+
+bb-deck slots
+bb-led-bridge frame 1=blue,2=question,F=white
+bb-led-bridge demo
+bb-led-bridge run --bb-url http://127.0.0.1:38886 --name Go60
+```
+
+The slot helper remembers the last selected thread under `$XDG_RUNTIME_DIR`.
+Action keys target that thread. If none has been selected, it falls back to a
+Status Sidebar row with a pending interaction, then slot 1.
+
+## Legacy Windows/Paseo support
+
+The previous implementation remains available:
+
+- `paseo-deck.ahk` catches the same keys on Windows.
+- `paseo-deck.sh` drives the Paseo CLI through WSL.
+- `paseo-deck-test.sh` is its read-only smoke test.
+- `led-bridge/src/main.rs` builds `paseo-led-bridge.exe` and consumes Paseo's
+  WebSocket protocol through WinRT BLE.

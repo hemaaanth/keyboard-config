@@ -1,9 +1,12 @@
-# paseo-led-bridge
+# Go60 LED bridges
 
-Host-side BLE bridge for the Go60 keyboard LED project. A Rust CLI, built to
-run on **Windows**, that writes LED frames to the ZMK firmware's custom GATT
-service and (via `run`) live-syncs Paseo agent/workspace state onto the
-keyboard.
+This crate builds two host-side bridges for the same Go60 GATT firmware:
+
+- `bb-led-bridge`: active Linux/BlueZ daemon for bb on Omarchy.
+- `paseo-led-bridge`: legacy Windows/WinRT daemon for Paseo.
+
+Both write the same LED frames, so the keyboard firmware did not need a new
+transport or a new pairing.
 
 ## Target device protocol
 
@@ -20,7 +23,8 @@ keyboard.
 
 ## Files
 
-- `Cargo.toml` — crate manifest (`paseo-led-bridge`)
+- `Cargo.toml` — crate manifest and both binary targets
+- `src/bb_main.rs` — Linux BlueZ client, bb REST/realtime client, status mapping
 - `src/main.rs` — everything: arg parsing, BLE connection logic, the WS
   client for `run`, the five subcommands, and a `#[cfg(test)]` self-check
   covering every pure decision the daemon makes (no BLE hardware or live
@@ -34,11 +38,33 @@ keyboard.
 | serde / serde_json | Paseo WS message parsing (`run`) |
 | tungstenite | WebSocket client to the Paseo daemon (`run`) |
 | windows     | WinRT Bluetooth LE (all commands) + Win32 global hotkey and foreground-window APIs (`run`, Windows-only) |
+| bluer / tokio | BlueZ GATT and async runtime for `bb-led-bridge` on Linux |
+| reqwest / tokio-tungstenite | bb thread snapshot and realtime change feed |
+
+## Linux bb bridge
+
+```bash
+cargo build --release --bin bb-led-bridge
+./target/release/bb-led-bridge frame 1=blue,F=white
+./target/release/bb-led-bridge demo
+./target/release/bb-led-bridge run
+```
+
+The default bb URL is `http://127.0.0.1:38886` (override with `BB_URL`,
+`BB_SERVER_URL`, or `--bb-url`). The default paired-device name filter is
+`Go60` (override with `--name`). The daemon fetches bb's
+`/api/v1/sidebar-bootstrap` data and the status-sidebar `listLater` RPC. It
+reproduces that plugin's section order, activity detection, pinned-first sort,
+and environment grouping, then subscribes to bb thread-list changes and the
+plugin's `later-threads` realtime signal.
+
+Install the release binary and user service with `../install-omarchy.sh`; see
+`../README.md` for the Hyprland bindings.
 
 CLI parsing is hand-rolled in `main.rs` (five subcommands, `--name` and
 `--ws-url` flags) — not enough surface to justify pulling in `clap`.
 
-## Build
+## Legacy Windows build
 
 Built from WSL (Linux host), cross-compiled to a Windows x86_64 executable.
 

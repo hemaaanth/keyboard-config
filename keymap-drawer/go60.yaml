@@ -57,7 +57,7 @@ layers:
   - {t: ']', s: '}'}
   - $$mdi:apple-keyboard-control$$
   - {t: '$$mdi:backspace$$', type: backspace}
-  - Paseo
+  - Agent Deck
   - '&mic_ptt'
   - {t: '$$mdi:keyboard-return$$', h: Fn}
   - $$mdi:keyboard-space$$
@@ -427,7 +427,7 @@ layers:
   - {t: '9', s: (}
   - {t: '8', s: '*'}
   - {t: '7', s: '&'}
-  Paseo:
+  Agent Deck:
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - F13
   - F14
@@ -446,8 +446,8 @@ layers:
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - '&plt'
-  - F23
-  - F24
+  - {t: '$$mdi:minus-circle-outline$$', type: none}
+  - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
@@ -455,7 +455,7 @@ layers:
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - Sft+F21
   - Sft+F19
-  - Ctl+L
+  - Sft+F23
   - Sft+F24
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - Sft+F17

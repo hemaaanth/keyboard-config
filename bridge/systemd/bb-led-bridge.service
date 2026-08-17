@@ -1,0 +1,19 @@
+[Unit]
+Description=Go60 LED status bridge for bb
+After=bluetooth.target bb-app.service
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/bb-led-bridge run
+Restart=always
+RestartSec=3
+
+# The bridge only needs bb's loopback API and the system BlueZ D-Bus.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target
