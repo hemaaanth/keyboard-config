@@ -1,37 +1,36 @@
-# Go60 Paseo layer
+# Go60 Agent Deck layer
 
-The ZMK side of Phase 1 of the Go60 ↔ Paseo integration (see
-`../bridge/README.md` for the Windows/WSL side). Implemented as the `paseo`
-layer in `config/go60.keymap`.
+The ZMK side of the Go60 host-agent integration (see `../bridge/README.md` for
+the active bb/Omarchy bridge). The internal layer and firmware module retain
+their original `paseo` names so existing device-tree identifiers and the GATT
+wire protocol stay compatible.
 
 ## Access
 
-Hold the **left thumb cluster's third key** (previously `&none` on the
-Windows layer) — it's `&mo LAYER_Paseo`, so the layer is active only while
-held. The Mac layer is untouched (Paseo runs on the Windows side).
+Hold the **left thumb cluster's third key** — it is `&mo LAYER_Paseo`, so the
+layer is active only while held.
 
 ## Bindings while held
 
 | Key | Sends | Meaning |
 |-----|-------|---------|
-| `1`–`9`, `0` | F13–F22 | Jump to Paseo workspace slot 1–10 |
-| `Y` | F23 | Approve pending permission |
-| `U` | F24 | Deny pending permission |
-| `H` | Shift+F17 | Usage-bar hotkey for the host bridge |
-| `D` | Ctrl+L | Focus Paseo's chat input |
+| `1`–`9`, `0` | F13–F22 | Jump to Status Sidebar row 1–10 |
+| `Y` / `U` | — | Unassigned; bb interactions are usually free-text questions |
+| `H` | Shift+F17 | Reserved legacy usage-bar hotkey |
+| `D` | Shift+F23 | Focus bb's composer |
 | `J` | Shift+F13 | Commit on the active slot's agent |
 | `K` | Shift+F14 | Push |
 | `L` | Shift+F15 | Open PR |
 | `;` | Shift+F16 | Merge |
-| `F` | Shift+F24 | Focus the Paseo window |
-| `T` | `&plt` | Toggle Paseo LEDs sync (see below) |
-| `W` / `S` | Shift+F18 / Shift+F19 | Thinking effort up / down on the active slot |
-| `Q` / `A` | Shift+F20 / Shift+F21 | Mode up (toward bypass) / down (toward plan) |
+| `F` | Shift+F24 | Focus the host agent app |
+| `T` | `&plt` | Toggle host-driven LED sync (see below) |
+| `W` / `S` | Shift+F18 / Shift+F19 | Reserved legacy effort controls |
+| `Q` / `A` | Shift+F20 / Shift+F21 | Reserved legacy mode controls |
 
 `G`/`P`/`R`/`M` (the old commit/push/pr/merge positions) are now `&none`.
 Everything else on the layer is `&none`, so a held layer key can't type
-stray characters. F13–F24 are dead keys on Windows unless the AutoHotkey
-bridge is running — same conflict-free idea as the Hyper-style
+stray characters. F13–F24 are dead keys unless a host binding handles them —
+the same conflict-free idea as the Hyper-style
 `Ctrl+Win+Alt+Shift+F5` key on the right thumb.
 
 ## Paseo LEDs (config/paseo-leds)
@@ -85,9 +84,9 @@ the tables above. Entries are applied in frame order, so a normal entry
 listed after a fill-all in the same frame still layers its single pixel on
 top.
 
-### Paseo-mode toggle (`&plt`)
+### Host-LED toggle (`&plt`)
 
-`T` on the Paseo layer toggles a module-global enabled flag on both halves
+`T` on the Agent Deck layer toggles a module-global enabled flag on both halves
 at once (global-locality behavior). Frames/behavior invocations always
 keep updating the pixel buffers regardless of this flag; only the final
 `led_strip` flush is gated on it. Disabling blanks the strip once;
