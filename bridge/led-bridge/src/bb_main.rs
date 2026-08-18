@@ -117,6 +117,38 @@ mod linux {
         thread_ids: Vec<String>,
     }
 
+    #[derive(Debug, Deserialize)]
+    struct ShortcutSlotsRpcResponse {
+        result: ShortcutSlotsResult,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ShortcutSlotsResult {
+        slots: Vec<ShortcutSlot>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ShortcutSlot {
+        #[allow(dead_code)]
+        thread_id: String,
+        #[allow(dead_code)]
+        title: String,
+        status: String,
+    }
+
+    impl ShortcutSlot {
+        fn color(&self) -> Rgb {
+            match self.status.as_str() {
+                "needs-input" => QUESTION,
+                "active" => WORKING,
+                "unread" => ATTENTION,
+                "idle" | "archived" => IDLE,
+                _ => OFF,
+            }
+        }
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum SidebarBucket {
         Pinned,
@@ -298,6 +330,22 @@ mod linux {
         }
         // Y/U used to be binary approve/deny controls, but bb interactions are
         // commonly free-text questions. Keep their retired LEDs cleared.
+        pixels.push((IDX_Y, OFF));
+        pixels.push((IDX_U, OFF));
+        pixels.push((IDX_F, FOCUS_BEACON));
+        pixels
+    }
+
+    fn shortcut_status_pixels(slots: &[ShortcutSlot]) -> Vec<(u8, Rgb)> {
+        let mut pixels: Vec<_> = slots
+            .iter()
+            .take(10)
+            .enumerate()
+            .map(|(index, slot)| (index as u8, slot.color()))
+            .collect();
+        for index in slots.len().min(10)..10 {
+            pixels.push((index as u8, OFF));
+        }
         pixels.push((IDX_Y, OFF));
         pixels.push((IDX_U, OFF));
         pixels.push((IDX_F, FOCUS_BEACON));
@@ -489,6 +537,25 @@ mod linux {
                 .collect())
         }
 
+        async fn shortcut_slots(&self) -> Result<Vec<ShortcutSlot>> {
+            let response: ShortcutSlotsRpcResponse = self
+                .http
+                .post(format!(
+                    "{}/api/v1/plugins/status-sidebar/rpc/listShortcutSlots",
+                    self.base_url
+                ))
+                .json(&serde_json::Value::Null)
+                .send()
+                .await
+                .context("could not query status-sidebar shortcut slots")?
+                .error_for_status()
+                .context("status-sidebar rejected the shortcut-slot request")?
+                .json()
+                .await
+                .context("status-sidebar returned invalid shortcut-slot data")?;
+            Ok(response.result.slots)
+        }
+
         fn ws_url(&self) -> Result<String> {
             if let Some(rest) = self.base_url.strip_prefix("http://") {
                 return Ok(format!("ws://{rest}/ws"));
@@ -501,6 +568,32 @@ mod linux {
     }
 
     async fn refresh(client: &BbClient, ble: &mut BleWriter, force: bool) -> Result<()> {
+        if let Ok(slots) = client.shortcut_slots().await {
+            let summary = slots
+                .iter()
+                .take(10)
+                .enumerate()
+                .map(|(index, slot)| format!("{}:{}", index + 1, color_name(slot.color())))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if ble.write(&shortcut_status_pixels(&slots), force).await? {
+                println!(
+                    "bb-led-bridge: {} published shortcut slot{}{}",
+                    slots.len().min(10),
+                    if slots.len() == 1 { "" } else { "s" },
+                    if summary.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({summary})")
+                    }
+                );
+            }
+            return Ok(());
+        }
+
+        // Compatibility with a status-sidebar build that predates the exact
+        // client-visible feed. This cannot mirror project mode or collapsed
+        // sections, but preserves the previous status-first behavior.
         let threads = client.threads().await?;
         let later = match client.later_threads().await {
             Ok(later) => later,
@@ -551,7 +644,7 @@ mod linux {
         {
             return matches!(
                 parsed.get("channel").and_then(|value| value.as_str()),
-                Some("later-threads" | "thread-order")
+                Some("later-threads" | "thread-order" | "shortcut-slots")
             );
         }
         const RELEVANT_CHANGES: &[&str] = &[
@@ -940,6 +1033,32 @@ mod linux {
         }
 
         #[test]
+        fn published_shortcut_slots_keep_client_order_and_status_colors() {
+            let slots = vec![
+                ShortcutSlot {
+                    thread_id: "project-first".to_string(),
+                    title: "Project first".to_string(),
+                    status: "unread".to_string(),
+                },
+                ShortcutSlot {
+                    thread_id: "question-second".to_string(),
+                    title: "Question second".to_string(),
+                    status: "needs-input".to_string(),
+                },
+                ShortcutSlot {
+                    thread_id: "working-third".to_string(),
+                    title: "Working third".to_string(),
+                    status: "active".to_string(),
+                },
+            ];
+            let pixels = shortcut_status_pixels(&slots);
+            assert_eq!(pixels[0], (0, ATTENTION));
+            assert_eq!(pixels[1], (1, QUESTION));
+            assert_eq!(pixels[2], (2, WORKING));
+            assert_eq!(pixels[3], (3, OFF));
+        }
+
+        #[test]
         fn frame_encoding_is_firmware_wire_format() {
             assert_eq!(
                 encode_frame(&[(0, WORKING), (IDX_F, IDLE)]).unwrap(),
@@ -963,6 +1082,9 @@ mod linux {
             ));
             assert!(message_requires_refresh(
                 r#"{"type":"plugin-signal","pluginId":"status-sidebar","channel":"thread-order","payload":null}"#
+            ));
+            assert!(message_requires_refresh(
+                r#"{"type":"plugin-signal","pluginId":"status-sidebar","channel":"shortcut-slots","payload":null}"#
             ));
         }
     }

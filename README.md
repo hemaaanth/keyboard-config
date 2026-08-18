@@ -28,9 +28,10 @@ Three cooperating pieces:
    (the BLE central), which paints its own LEDs and forwards right-half
    pixels over the wireless split link. The Agent Deck layer (held via the left
    thumb key) emits F13–F24 — dead keys to every app except the bridge.
-2. **`bb-led-bridge`** (Rust): reads bb's thread list once, subscribes to bb's
-   realtime WebSocket, and writes changed status frames through BlueZ. It runs
-   as a user systemd service and reconnects to both bb and the keyboard.
+2. **`bb-led-bridge`** (Rust): reads the Status Sidebar's exact visible shortcut
+   slots, subscribes to bb's realtime WebSocket, and writes changed status
+   frames through BlueZ. It runs as a user systemd service and reconnects to
+   both bb and the keyboard.
 3. **`bb-deck` + Omarchy bindings**: catch the deck's function-key events globally,
    focus bb's web-app window across workspaces, open status-sidebar thread slots,
    focus the composer, and queue commit/push/PR/merge instructions.

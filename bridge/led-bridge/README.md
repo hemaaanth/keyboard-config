@@ -52,12 +52,11 @@ cargo build --release --bin bb-led-bridge
 
 The default bb URL is `http://127.0.0.1:38886` (override with `BB_URL`,
 `BB_SERVER_URL`, or `--bb-url`). The default paired-device name filter is
-`Go60` (override with `--name`). The daemon fetches bb's
-`/api/v1/sidebar-bootstrap` data and the status-sidebar `listLater` and
-`listThreadOrder` RPCs. It reproduces that plugin's pinned/unread/status section
-order, saved drag order, pinned status grouping, activity detection, and
-environment grouping, then subscribes to bb thread-list changes and the
-plugin's `later-threads` and `thread-order` realtime signals.
+`Go60` (override with `--name`). The daemon fetches the status-sidebar
+`listShortcutSlots` RPC, which is the exact visible row order used by bb's
+numbered shortcuts. It subscribes to the plugin's `shortcut-slots` realtime
+signal. Older plugin builds fall back to `/api/v1/sidebar-bootstrap`,
+`listLater`, and `listThreadOrder` and their realtime signals.
 
 Install the release binary and user service with `../install-omarchy.sh`; see
 `../README.md` for the Hyprland bindings.
