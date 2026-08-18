@@ -4,7 +4,9 @@ The Go60's Agent Deck layer emits F13–F24. Omarchy/Hyprland catches those
 otherwise-unused keys and routes them through `bb-deck`, while
 `bb-led-bridge` mirrors Status Sidebar thread state to the keyboard over the
 existing custom Bluetooth GATT service. Slot order comes from the installed
-`status-sidebar` plugin's status-first model.
+`status-sidebar` plugin's status-first model. It also watches Voxtype's runtime
+state file and keeps the right thumb-key LED red only while audio is actively
+being recorded; idle and transcribing states clear it.
 
 ## Install
 
@@ -18,6 +20,9 @@ bridge/install-omarchy.sh
 Add these bindings to `~/.config/hypr/bindings.lua`:
 
 ```lua
+-- Right thumb microphone key: one press starts Voxtype, the next stops it.
+o.bind("SUPER + CTRL + ALT + SHIFT + F5", "Toggle dictation", "voxtype record toggle")
+
 -- Go60 Agent Deck: raw XKB codes 191-202 are F13-F24. Raw codes are
 -- intentional: symbolic F13-F24 bindings are unreliable for this BLE HID.
 o.bind("code:191", "BB thread slot 1", "bb-deck slot 1")
@@ -52,6 +57,9 @@ hyprctl reload
 hyprctl configerrors
 ```
 
+Voxtype must have `state_file = "auto"` (or another enabled state path) so
+the bridge can distinguish `recording`, `transcribing`, and `idle`.
+
 `D` changed from `Ctrl+L` to `Shift+F23`, so flash the current
 `config/go60.keymap` build before expecting the composer shortcut to work.
 
@@ -75,7 +83,9 @@ status-first projection. Run `bb-deck slots` to print the current mapping.
 `Y` and `U` are unassigned. The `F` LED is a dim always-on locator for the
 focus shortcut. `bb-led-bridge` subscribes to bb's `/ws` thread-list changes
 and status-sidebar's `Later` and thread-order signals; a 30-second full refresh
-recovers missed BLE writes.
+recovers missed BLE writes. It polls `$XDG_RUNTIME_DIR/voxtype/state` for
+recording transitions (override with `VOXTYPE_STATE_FILE`) and includes the mic
+state in the same serialized BLE connection, so competing writers cannot race.
 
 ## Commands and diagnostics
 
@@ -84,7 +94,7 @@ systemctl --user status bb-led-bridge
 journalctl --user -u bb-led-bridge -f
 
 bb-deck slots
-bb-led-bridge frame 1=blue,2=question,F=white
+bb-led-bridge frame 1=blue,2=question,F=white,mic=red
 bb-led-bridge demo
 bb-led-bridge run --bb-url http://127.0.0.1:38886 --name Go60
 ```

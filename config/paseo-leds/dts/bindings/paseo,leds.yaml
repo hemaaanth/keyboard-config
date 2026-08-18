@@ -8,10 +8,9 @@ description: |
   0-4 in right-number-row-indices) = right-half keys 6,7,8,9,0, logical
   index 10-15 (array index 0-5 in right-extra-indices, order Y U J K L
   SEMI) = right-half home-row action keys, logical indices 16-17 (the two
-  entries in left-extra-indices) = left-half F and D. Index 0xFE in a frame/
-  behavior-invocation pixel entry is not a logical index at all -- it's
-  the fill-all sentinel (see paseo_leds.c) and doesn't consult either
-  table.
+  entries in left-extra-indices) = left-half F and D. Index 0xFD carries
+  host microphone state and 0xFE is the fill-all sentinel. Neither is a
+  logical index or consults the lookup tables (see paseo_leds.c).
 
   left-number-row-indices is derived directly from the commented physical
   layout on go60_lh.dts's `underglow_indicators` node (row 0 = top row):
@@ -49,4 +48,4 @@ properties:
   right-mic-index:
     type: int
     required: true
-    description: Right strip index for the inner push-to-talk thumb key.
+    description: Right strip index for the inner Voxtype microphone thumb key.

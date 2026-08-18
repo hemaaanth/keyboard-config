@@ -18,4 +18,10 @@
 2. **[2026-08-17] Status Sidebar ordering is persisted by the plugin**
    Do instead: query both `listLater` and `listThreadOrder`, then apply the plugin's `Pinned`, `Unread`, `Active`, `Needs input`, `Idle`, `Later`, `Archived` section model; do not infer row order from timestamps alone.
 
+3. **[2026-08-17] Avoid release binds for compound ZMK HID chords**
+   Do instead: emit a complete shortcut as a macro tap and let the host own application state.
+
+4. **[2026-08-17] Debounce Voxtype config-triggered restarts**
+   Do instead: coalesce vocabulary edits, reset the unit failure counter, and restart once after edits settle.
+
 ## User Directives

@@ -1,6 +1,6 @@
 layout: {zmk_keyboard: go60}
 layers:
-  Windows:
+  Linux:
   - {t: '=', s: +}
   - {t: '1', s: '!'}
   - {t: '2', s: '@'}

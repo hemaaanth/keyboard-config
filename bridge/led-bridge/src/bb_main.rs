@@ -12,6 +12,7 @@ mod linux {
     use std::cmp::Ordering;
     use std::collections::HashMap;
     use std::env;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tokio::time::{interval, sleep, MissedTickBehavior};
     use tokio_tungstenite::tungstenite::Message;
@@ -31,6 +32,7 @@ mod linux {
     const IDX_Y: u8 = 10;
     const IDX_U: u8 = 11;
     const IDX_F: u8 = 16;
+    const MIC_STATE: u8 = 0xfd;
     const FILL_ALL: u8 = 0xfe;
 
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -368,6 +370,7 @@ mod linux {
         name_filter: String,
         characteristic: Option<Characteristic>,
         last_frame: Option<Vec<u8>>,
+        last_mic_state: Option<bool>,
     }
 
     impl BleWriter {
@@ -376,6 +379,7 @@ mod linux {
                 name_filter,
                 characteristic: None,
                 last_frame: None,
+                last_mic_state: None,
             }
         }
 
@@ -426,24 +430,19 @@ mod linux {
             )
         }
 
-        async fn write(&mut self, pixels: &[(u8, Rgb)], force: bool) -> Result<bool> {
-            let frame = encode_frame(pixels)?;
-            if !force && self.last_frame.as_ref() == Some(&frame) {
-                return Ok(false);
-            }
+        async fn write_frame(&mut self, frame: &[u8]) -> Result<()> {
             for attempt in 0..2 {
                 if self.characteristic.is_none() {
                     self.characteristic = Some(self.locate().await?);
                 }
                 let characteristic = self.characteristic.as_ref().expect("set above");
-                match characteristic.write(&frame).await {
-                    Ok(()) => {
-                        self.last_frame = Some(frame);
-                        return Ok(true);
-                    }
+                match characteristic.write(frame).await {
+                    Ok(()) => return Ok(()),
                     Err(error) if attempt == 0 => {
                         eprintln!("bb-led-bridge: Bluetooth write failed, reconnecting: {error}");
                         self.characteristic = None;
+                        self.last_frame = None;
+                        self.last_mic_state = None;
                     }
                     Err(error) => {
                         return Err(error).context("Bluetooth write failed after reconnect")
@@ -451,6 +450,27 @@ mod linux {
                 }
             }
             unreachable!()
+        }
+
+        async fn write(&mut self, pixels: &[(u8, Rgb)], force: bool) -> Result<bool> {
+            let frame = encode_frame(pixels)?;
+            if !force && self.last_frame.as_ref() == Some(&frame) {
+                return Ok(false);
+            }
+            self.write_frame(&frame).await?;
+            self.last_frame = Some(frame);
+            Ok(true)
+        }
+
+        async fn write_mic(&mut self, recording: bool, force: bool) -> Result<bool> {
+            if !force && self.last_mic_state == Some(recording) {
+                return Ok(false);
+            }
+            let color = if recording { ERROR } else { OFF };
+            let frame = encode_frame(&[(MIC_STATE, color)])?;
+            self.write_frame(&frame).await?;
+            self.last_mic_state = Some(recording);
+            Ok(true)
         }
     }
 
@@ -678,13 +698,42 @@ mod linux {
             })
     }
 
+    fn voxtype_state_path() -> Result<PathBuf> {
+        if let Some(path) = env::var_os("VOXTYPE_STATE_FILE") {
+            return Ok(path.into());
+        }
+        let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+            .context("XDG_RUNTIME_DIR is unset; set VOXTYPE_STATE_FILE explicitly")?;
+        Ok(PathBuf::from(runtime_dir).join("voxtype/state"))
+    }
+
+    fn read_voxtype_recording(path: &Path) -> Result<bool> {
+        let state = std::fs::read_to_string(path)
+            .with_context(|| format!("could not read Voxtype state at {}", path.display()))?;
+        parse_voxtype_recording(&state)
+    }
+
+    fn parse_voxtype_recording(state: &str) -> Result<bool> {
+        match state.trim() {
+            "recording" => Ok(true),
+            "idle" | "transcribing" => Ok(false),
+            other => bail!("unknown Voxtype state '{other}'"),
+        }
+    }
+
     async fn run_daemon(name_filter: String, bb_url: String) -> Result<()> {
         let client = BbClient::new(bb_url);
         let ws_url = client.ws_url()?;
+        let voxtype_state_path = voxtype_state_path()?;
+        let mut mic_recording = read_voxtype_recording(&voxtype_state_path).unwrap_or(false);
+        let mut voxtype_warning_active = false;
         let mut ble = BleWriter::new(name_filter);
         loop {
             if let Err(error) = refresh(&client, &mut ble, true).await {
                 eprintln!("bb-led-bridge: initial refresh failed: {error:#}");
+            }
+            if let Err(error) = ble.write_mic(mic_recording, true).await {
+                eprintln!("bb-led-bridge: initial microphone sync failed: {error:#}");
             }
 
             println!("bb-led-bridge: connecting to bb realtime at {ws_url}");
@@ -707,6 +756,9 @@ mod linux {
             let mut repush = interval(Duration::from_secs(30));
             repush.set_missed_tick_behavior(MissedTickBehavior::Delay);
             repush.tick().await;
+            let mut voxtype_poll = interval(Duration::from_millis(100));
+            voxtype_poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            voxtype_poll.tick().await;
             let reconnect = loop {
                 tokio::select! {
                     message = socket.next() => {
@@ -734,6 +786,34 @@ mod linux {
                     _ = repush.tick() => {
                         if let Err(error) = refresh(&client, &mut ble, true).await {
                             eprintln!("bb-led-bridge: periodic refresh failed: {error:#}");
+                        }
+                        if let Err(error) = ble.write_mic(mic_recording, true).await {
+                            eprintln!("bb-led-bridge: periodic microphone sync failed: {error:#}");
+                        }
+                    }
+                    _ = voxtype_poll.tick() => {
+                        match read_voxtype_recording(&voxtype_state_path) {
+                            Ok(recording) => {
+                                voxtype_warning_active = false;
+                                if recording != mic_recording {
+                                    mic_recording = recording;
+                                    match ble.write_mic(recording, false).await {
+                                        Ok(true) => println!(
+                                            "bb-led-bridge: microphone {}",
+                                            if recording { "recording" } else { "off" }
+                                        ),
+                                        Ok(false) => {},
+                                        Err(error) => eprintln!(
+                                            "bb-led-bridge: microphone sync failed: {error:#}"
+                                        ),
+                                    }
+                                }
+                            }
+                            Err(error) if !voxtype_warning_active => {
+                                voxtype_warning_active = true;
+                                eprintln!("bb-led-bridge: Voxtype state unavailable: {error:#}");
+                            }
+                            Err(_) => {},
                         }
                     }
                     _ = tokio::signal::ctrl_c() => break false,
@@ -789,6 +869,7 @@ mod linux {
             "y" => Ok(IDX_Y),
             "u" => Ok(IDX_U),
             "f" => Ok(IDX_F),
+            "mic" => Ok(MIC_STATE),
             "all" => Ok(FILL_ALL),
             _ => bail!("unknown LED key '{value}'"),
         }
@@ -809,7 +890,7 @@ mod linux {
     fn usage() {
         eprintln!("bb-led-bridge (Linux/BlueZ)");
         eprintln!("  bb-led-bridge run [--name Go60] [--bb-url http://127.0.0.1:38886]");
-        eprintln!("  bb-led-bridge frame 1=blue,2=question,F=white [--name Go60]");
+        eprintln!("  bb-led-bridge frame 1=blue,2=question,F=white,mic=red [--name Go60]");
         eprintln!("  bb-led-bridge demo [--name Go60]");
     }
 
@@ -1063,6 +1144,22 @@ mod linux {
             assert_eq!(
                 encode_frame(&[(0, WORKING), (IDX_F, IDLE)]).unwrap(),
                 vec![2, 0, 0, 51, 255, 16, 10, 10, 10]
+            );
+        }
+
+        #[test]
+        fn voxtype_recording_state_only_lights_for_active_capture() {
+            assert!(parse_voxtype_recording("recording\n").unwrap());
+            assert!(!parse_voxtype_recording("transcribing\n").unwrap());
+            assert!(!parse_voxtype_recording("idle\n").unwrap());
+            assert!(parse_voxtype_recording("unknown").is_err());
+        }
+
+        #[test]
+        fn mic_frame_uses_the_host_state_sentinel() {
+            assert_eq!(
+                encode_frame(&[(MIC_STATE, ERROR)]).unwrap(),
+                vec![1, 0xfd, 255, 0, 0]
             );
         }
 

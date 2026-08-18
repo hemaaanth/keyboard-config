@@ -7,9 +7,9 @@ description: |
   peripheral over the split link. Not meant to be bound in a keymap layer.
   param1/param2 each pack one pixel as index<<24 | r<<16 | g<<8 | b; param2
   may be the sentinel 0xFFFFFFFF meaning "no second pixel this call". The
-  index byte may also be 0xFE, the fill-all sentinel: the peripheral fills
-  and flushes its entire strip with r,g,b instead of looking the index up
-  in right-number-row-indices/right-extra-indices (see paseo_leds.c).
+  index byte may also be 0xFD, the host microphone-state sentinel, or 0xFE,
+  the fill-all sentinel. The peripheral applies either control operation
+  without consulting the logical key maps (see paseo_leds.c).
 
 compatible: "paseo,leds-invoke"
 

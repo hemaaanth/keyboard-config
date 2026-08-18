@@ -53,7 +53,8 @@ LEDs and jump slots, including its pinned section and saved drag order. Colors:
 | `F` | Focus bb, switching to its Hyprland workspace (always-on white beacon) |
 | `T` | Toggle the LED sync on/off |
 
-the status colors follow the regular RGB brightness/saturation keys on the
+The right thumb microphone key stays red while Voxtype is recording, and all
+host-synced colors follow the regular RGB brightness/saturation keys on the
 Magic layer. Deep details: [docs/go60-paseo-layer.md](docs/go60-paseo-layer.md)
 (firmware/protocol), [bridge/README.md](bridge/README.md) (Omarchy install and
 hotkeys), [bridge/led-bridge/README.md](bridge/led-bridge/README.md) (bridge

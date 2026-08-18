@@ -7,8 +7,9 @@ wire protocol stay compatible.
 
 ## Access
 
-Hold the **left thumb cluster's third key** — it is `&mo LAYER_Paseo`, so the
-layer is active only while held.
+Hold the **left thumb cluster's third key** on the Linux layer — it is
+`&mo LAYER_Paseo`, so the Agent Deck layer is active only while held. The
+Mac layer is untouched.
 
 ## Bindings while held
 
@@ -74,6 +75,14 @@ left-half strip grid in `config/paseo-leds/src/paseo_leds.c`):
 The right-half mirror carries the same not-verified-on-hardware caveat as
 `right-number-row-indices`; correct `right-extra-indices` in the keymap if
 the wrong keys light up on real hardware.
+
+### Microphone-state frame op
+
+A frame entry with index byte `0xFD` carries authoritative Voxtype state from
+the Linux `bb-led-bridge` to the right half. Any nonzero RGB payload enables a
+red overlay on the right thumb microphone key; an all-zero payload disables
+it. The overlay is independent of the physical key press and turns off when
+Voxtype moves from `recording` to `transcribing` or `idle`.
 
 ### Fill-all frame op
 

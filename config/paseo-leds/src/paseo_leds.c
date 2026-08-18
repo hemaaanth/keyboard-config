@@ -20,6 +20,10 @@
  *     peripheral, see app/src/split/peripheral.c) and applies the packed
  *     pixels to its own strip
  *
+ * Mic-state op: index 0xFD carries authoritative host recording state. A
+ * nonzero RGB payload enables the right thumb-key red overlay; all-zero turns
+ * it off. The central forwards the op to the right peripheral like a pixel.
+ *
  * Fill-all op: a frame/behavior-invocation pixel entry whose index byte is
  * 0xFE (PASEO_LEDS_FILL_ALL) means "set every LED on BOTH halves to this
  * r,g,b" -- used by the host for full-keyboard alarm flashes. It is not a
@@ -100,6 +104,9 @@ LOG_MODULE_REGISTER(paseo_leds, CONFIG_ZMK_LOG_LEVEL);
 /* Not a logical index -- "set every LED on both halves to r,g,b". See the
  * module comment above. */
 #define PASEO_LEDS_FILL_ALL 0xFEu
+
+/* Host-authoritative microphone recording state, forwarded to the right half. */
+#define PASEO_LEDS_MIC_STATE 0xFDu
 
 #define PASEO_LEDS_CFG DT_NODELABEL(paseo_leds)
 
@@ -366,7 +373,7 @@ void paseo_leds_toggle(void) {
  *   29 25 20 15 10  6
  *         21 16 11   0 1 2
  *
- * Row 0 (top row) is the number row; go60.keymap's "windows"/"mac" layers
+ * Row 0 (top row) is the number row; go60.keymap's "linux"/"mac" layers
  * put EQUAL/N1/N2/N3/N4/N5 in columns 0-5 of that row. Column bases read:
  * col0=26 col1=22 col2=17 col3=12 col4=7 col5=3. So:
  *   N1(col1)=22 N2(col2)=17 N3(col3)=12 N4(col4)=7 N5(col5)=3
@@ -409,7 +416,9 @@ static void paseo_leds_apply_one_frame(const struct paseo_leds_frame *frame) {
     for (int i = 0; i < frame->count; i++) {
         const struct paseo_leds_pixel *px = &frame->pixels[i];
 
-        if (px->index == PASEO_LEDS_FILL_ALL) {
+        if (px->index == PASEO_LEDS_MIC_STATE) {
+            right_packed[right_count++] = paseo_leds_pack(px);
+        } else if (px->index == PASEO_LEDS_FILL_ALL) {
             /* Fill+flush this half immediately (own 30 pixels), then
              * forward exactly one packed fill-all entry so the peripheral
              * does the same to its half. Later entries in this same frame
@@ -476,11 +485,12 @@ static K_WORK_DEFINE(apply_frame_work, paseo_leds_apply_frame);
  *   then n * 4 bytes: [logical_index, r, g, b]
  * Logical index 0-9 = number keys 1,2,3,4,5,6,7,8,9,0. Logical index
  * 10-15 = Y,U,J,K,L,SEMI. Logical indices 16-17 = F,D. Logical indices 18-29 set
- * whole keyboard columns (=, 1-5, 6-0, -). Index byte 0xFE is the
- * fill-all sentinel (see module comment), not a logical index -- it may
- * appear at most meaningfully once per frame but nothing stops a second
- * one; both would just be applied and flushed in order like any other
- * entry.
+ * whole keyboard columns (=, 1-5, 6-0, -). Index byte 0xFD is the host
+ * microphone-state sentinel; a nonzero color means recording. Index byte
+ * 0xFE is the fill-all sentinel (see module comment). Neither is a logical
+ * index; 0xFE may appear at most meaningfully once per frame but nothing
+ * stops a second one. Both would just be applied and flushed in order like
+ * any other entry.
  */
 static ssize_t paseo_leds_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                 const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
@@ -572,6 +582,11 @@ static void paseo_leds_apply_packed(uint32_t packed) {
     uint8_t r = (packed >> 16) & 0xFF;
     uint8_t g = (packed >> 8) & 0xFF;
     uint8_t b = packed & 0xFF;
+
+    if (index == PASEO_LEDS_MIC_STATE) {
+        paseo_leds_mic_set(r != 0 || g != 0 || b != 0);
+        return;
+    }
 
     if (index == PASEO_LEDS_FILL_ALL) {
         paseo_leds_fill_local(r, g, b);

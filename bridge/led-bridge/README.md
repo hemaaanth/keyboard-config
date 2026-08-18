@@ -17,6 +17,8 @@ transport or a new pairing.
   - Logical index 10-17 = `Y U J K L ; F D`.
   - Logical index 18-29 = full columns `= 1 2 3 4 5 6 7 8 9 0 -`.
   - Frames may contain up to 18 pixel entries.
+  - Index byte `0xFD` is the **microphone-state** op: any nonzero RGB payload
+    turns on the right thumb-key red overlay; all-zero turns it off.
   - Index byte `0xFE` is the **fill-all** op: sets all 30 LEDs on both
     halves to that r,g,b. Later entries in the same frame layer on top of
     it (so `[0xFE=red, 3=blue]` means "all red except key 4").
@@ -56,7 +58,10 @@ The default bb URL is `http://127.0.0.1:38886` (override with `BB_URL`,
 `listShortcutSlots` RPC, which is the exact visible row order used by bb's
 numbered shortcuts. It subscribes to the plugin's `shortcut-slots` realtime
 signal. Older plugin builds fall back to `/api/v1/sidebar-bootstrap`,
-`listLater`, and `listThreadOrder` and their realtime signals.
+`listLater`, and `listThreadOrder` and their realtime signals. It also polls
+Voxtype's `$XDG_RUNTIME_DIR/voxtype/state` file every 100ms and sends the
+`0xFD` state op on recording transitions. Set `VOXTYPE_STATE_FILE` if Voxtype
+uses a custom state path.
 
 Install the release binary and user service with `../install-omarchy.sh`; see
 `../README.md` for the Hyprland bindings.

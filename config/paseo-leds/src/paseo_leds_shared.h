@@ -19,6 +19,7 @@
  * split role. */
 void paseo_leds_toggle(void);
 
-/* Overlays red on the right-hand push-to-talk key while active. The
- * underlying host-driven pixel stays untouched and is revealed on release. */
+/* Overlays red on the right-hand microphone key while Voxtype is recording.
+ * The underlying host-driven pixel stays untouched and is revealed when the
+ * host reports idle or transcribing. */
 void paseo_leds_mic_set(bool active);
