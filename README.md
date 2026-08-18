@@ -36,7 +36,7 @@ Three cooperating pieces:
    focus the composer, and queue commit/push/PR/merge instructions.
 
 **Slots:** the first ten rows in the native **Status Sidebar** get the number-key
-LEDs and jump slots, in the same status-first order shown there. Colors:
+LEDs and jump slots, including its pinned section and saved drag order. Colors:
 **white** idle/read ·
 **yellow** asking a question or awaiting approval · **blue** working ·
 **green** finished/unread · **red** error.

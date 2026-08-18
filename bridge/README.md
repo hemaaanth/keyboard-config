@@ -39,7 +39,12 @@ o.bind("SHIFT + code:202", "Focus BB", "bb-deck focus")
 ```
 
 Hyprland switches to the workspace containing bb when `bb-deck focus` runs.
-If the web app is closed, Omarchy launches it at the configured local bb URL.
+`bb-deck` reads bb's web-app URL from
+`~/.local/share/applications/BB.desktop` and derives the Chromium window class
+from it. Reinstalling the web app with a different URL therefore keeps focus
+and slot shortcuts attached to the existing window. `BB_APP_URL`,
+`BB_WINDOW_CLASS`, and `BB_DESKTOP_FILE` can override discovery when needed.
+If the web app is closed, Omarchy launches it at the discovered URL.
 After editing the bindings, validate them:
 
 ```bash
@@ -54,10 +59,11 @@ hyprctl configerrors
 
 The first ten Status Sidebar rows map directly to the number row and the
 F13–F22 slot shortcuts. The bridge reproduces the sidebar's section order
-(`Active`, `Needs input`, `Idle`, `Later`, `Archived`), pinned-first sorting
-inside each section, and environment/worktree grouping. `Later` placement is
-read from the status-sidebar plugin itself. Run `bb-deck slots` to print the
-current physical mapping.
+(`Pinned`, `Unread`, `Active`, `Needs input`, `Idle`, `Later`, `Archived`),
+saved drag order inside each section, pinned status grouping, and
+environment/worktree grouping. `Later` placement and manual order are read
+from the status-sidebar plugin itself. Run `bb-deck slots` to print the current
+physical mapping.
 
 | Color | bb state |
 |---|---|
@@ -67,9 +73,10 @@ current physical mapping.
 | green | finished attention that has not been read |
 | red | error |
 
-`Y` and `U` are unassigned. The `F` LED is a dim always-on locator for the focus shortcut. `bb-led-bridge`
-subscribes to bb's `/ws` thread-list changes and status-sidebar's `Later`
-signal; a 30-second full refresh recovers missed BLE writes.
+`Y` and `U` are unassigned. The `F` LED is a dim always-on locator for the
+focus shortcut. `bb-led-bridge` subscribes to bb's `/ws` thread-list changes
+and status-sidebar's `Later` and thread-order signals; a 30-second full refresh
+recovers missed BLE writes.
 
 ## Commands and diagnostics
 
