@@ -57,13 +57,12 @@ hyprctl configerrors
 
 ## Slots and colors
 
-The first ten Status Sidebar rows map directly to the number row and the
-F13–F22 slot shortcuts. The bridge reproduces the sidebar's section order
-(`Pinned`, `Unread`, `Active`, `Needs input`, `Idle`, `Later`, `Archived`),
-saved drag order inside each section, pinned status grouping, and
-environment/worktree grouping. `Later` placement and manual order are read
-from the status-sidebar plugin itself. Run `bb-deck slots` to print the current
-physical mapping.
+The first ten Status Sidebar shortcut rows map directly to the number row and
+the F13–F22 slot shortcuts. The sidebar publishes the exact client-visible
+order, so Status/Projects mode, collapsed sections, search filtering, saved
+drag order, worktree grouping, and attached-agent exclusion all match the
+physical mapping. Older plugin builds fall back to the previous reconstructed
+status-first projection. Run `bb-deck slots` to print the current mapping.
 
 | Color | bb state |
 |---|---|

@@ -82,7 +82,31 @@ bb_is_focused() {
     [[ "$class" == "$window_class" || "$initial_class" == "$window_class" ]]
 }
 
-status_sidebar_slots() {
+published_status_sidebar_slots() {
+    curl -fsS \
+        -H 'content-type: application/json' \
+        -d 'null' \
+        "$BB_URL/api/v1/plugins/status-sidebar/rpc/listShortcutSlots" |
+        jq -e '
+            .result.slots
+            | to_entries
+            | map({
+                id: .value.threadId,
+                title: .value.title,
+                bucket: .value.status,
+                color: (
+                    if .value.status == "needs-input" then "question"
+                    elif .value.status == "active" then "working"
+                    elif .value.status == "unread" then "unread"
+                    else "idle"
+                    end
+                ),
+                slot: (.key + 1)
+            })
+        '
+}
+
+legacy_status_sidebar_slots() {
     local navigation later_rpc order_rpc
     navigation=$(curl -fsS "$BB_URL/api/v1/sidebar-bootstrap")
     if ! later_rpc=$(curl -fsS \
@@ -192,6 +216,14 @@ status_sidebar_slots() {
         | to_entries
         | map(.value + { slot: (.key + 1) })
     '
+}
+
+status_sidebar_slots() {
+    # Newer status-sidebar builds publish the exact client-visible shortcut
+    # rows, including layout mode, collapsed sections, search, worktree groups,
+    # and attached-agent exclusion. Keep the reconstructed projection as a
+    # compatibility fallback while older plugin builds are still installed.
+    published_status_sidebar_slots 2>/dev/null || legacy_status_sidebar_slots
 }
 
 thread_for_slot() {
