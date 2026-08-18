@@ -42,7 +42,6 @@ mod linux {
         id: String,
         status: String,
         project_id: String,
-        parent_thread_id: Option<String>,
         archived_at: Option<u64>,
         pinned_at: Option<u64>,
         updated_at: u64,
@@ -107,8 +106,21 @@ mod linux {
         placed_at: u64,
     }
 
+    #[derive(Debug, Deserialize)]
+    struct ThreadOrderRpcResponse {
+        result: ThreadOrderResult,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ThreadOrderResult {
+        thread_ids: Vec<String>,
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum SidebarBucket {
+        Pinned,
+        Unread,
         Active,
         NeedsInput,
         Idle,
@@ -116,7 +128,9 @@ mod linux {
         Archived,
     }
 
-    const SIDEBAR_BUCKETS: [SidebarBucket; 5] = [
+    const SIDEBAR_BUCKETS: [SidebarBucket; 7] = [
+        SidebarBucket::Pinned,
+        SidebarBucket::Unread,
         SidebarBucket::Active,
         SidebarBucket::NeedsInput,
         SidebarBucket::Idle,
@@ -127,12 +141,6 @@ mod linux {
     impl ThreadEntry {
         fn is_unread(&self) -> bool {
             self.last_read_at.unwrap_or_default() < self.latest_attention_at
-        }
-
-        fn is_unread_done(&self) -> bool {
-            self.parent_thread_id.is_none()
-                && matches!(self.status.as_str(), "idle" | "error")
-                && self.is_unread()
         }
 
         fn is_active(&self) -> bool {
@@ -150,16 +158,18 @@ mod linux {
         }
 
         fn needs_input(&self) -> bool {
-            self.has_pending_interaction || (self.status == "error" && self.is_unread_done())
+            self.has_pending_interaction || (self.status == "error" && self.is_unread())
         }
 
-        fn bucket(&self, later: &HashMap<String, u64>) -> SidebarBucket {
+        fn status_bucket(&self, later: &HashMap<String, u64>) -> SidebarBucket {
             if self.archived_at.is_some() {
                 SidebarBucket::Archived
             } else if self.needs_input() {
                 SidebarBucket::NeedsInput
             } else if self.is_active() {
                 SidebarBucket::Active
+            } else if self.is_unread() {
+                SidebarBucket::Unread
             } else if later.contains_key(&self.id) {
                 SidebarBucket::Later
             } else {
@@ -167,17 +177,39 @@ mod linux {
             }
         }
 
+        fn bucket(&self, later: &HashMap<String, u64>) -> SidebarBucket {
+            if self.archived_at.is_some() {
+                SidebarBucket::Archived
+            } else if self.pinned_at.is_some() {
+                SidebarBucket::Pinned
+            } else {
+                self.status_bucket(later)
+            }
+        }
+
+        fn pinned_status_rank(&self, later: &HashMap<String, u64>) -> u8 {
+            match self.status_bucket(later) {
+                SidebarBucket::NeedsInput => 0,
+                SidebarBucket::Unread => 1,
+                SidebarBucket::Active => 2,
+                SidebarBucket::Idle => 3,
+                SidebarBucket::Later => 4,
+                SidebarBucket::Archived => 5,
+                SidebarBucket::Pinned => unreachable!("natural status cannot be pinned"),
+            }
+        }
+
         fn color(&self) -> Rgb {
             if self.has_pending_interaction {
                 return QUESTION;
             }
-            if self.status == "error" && self.is_unread_done() {
+            if self.status == "error" && self.is_unread() {
                 return ERROR;
             }
             if self.is_active() {
                 return WORKING;
             }
-            if self.is_unread_done() {
+            if self.is_unread() {
                 return ATTENTION;
             }
             IDLE
@@ -187,13 +219,23 @@ mod linux {
     fn compare_sidebar_rows(
         bucket: SidebarBucket,
         later: &HashMap<String, u64>,
+        order: &HashMap<String, usize>,
         left: &ThreadEntry,
         right: &ThreadEntry,
     ) -> Ordering {
-        match (left.pinned_at.is_some(), right.pinned_at.is_some()) {
-            (true, false) => return Ordering::Less,
-            (false, true) => return Ordering::Greater,
-            _ => {}
+        if bucket == SidebarBucket::Pinned {
+            let status_order = left
+                .pinned_status_rank(later)
+                .cmp(&right.pinned_status_rank(later));
+            if status_order != Ordering::Equal {
+                return status_order;
+            }
+        }
+        match (order.get(&left.id), order.get(&right.id)) {
+            (Some(left_index), Some(right_index)) => return left_index.cmp(right_index),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => {}
         }
         match bucket {
             SidebarBucket::Later => later
@@ -224,6 +266,7 @@ mod linux {
     fn slotted_threads<'a>(
         entries: &'a [ThreadEntry],
         later: &HashMap<String, u64>,
+        order: &HashMap<String, usize>,
     ) -> Vec<&'a ThreadEntry> {
         let mut slots = Vec::new();
         for bucket in SIDEBAR_BUCKETS {
@@ -231,15 +274,19 @@ mod linux {
                 .iter()
                 .filter(|thread| thread.bucket(later) == bucket)
                 .collect();
-            rows.sort_by(|left, right| compare_sidebar_rows(bucket, later, left, right));
+            rows.sort_by(|left, right| compare_sidebar_rows(bucket, later, order, left, right));
             slots.extend(group_by_environment(rows));
         }
         slots.truncate(10);
         slots
     }
 
-    fn status_pixels(entries: &[ThreadEntry], later: &HashMap<String, u64>) -> Vec<(u8, Rgb)> {
-        let slots = slotted_threads(entries, later);
+    fn status_pixels(
+        entries: &[ThreadEntry],
+        later: &HashMap<String, u64>,
+        order: &HashMap<String, usize>,
+    ) -> Vec<(u8, Rgb)> {
+        let slots = slotted_threads(entries, later, order);
         let mut pixels: Vec<_> = slots
             .iter()
             .enumerate()
@@ -417,6 +464,31 @@ mod linux {
                 .collect())
         }
 
+        async fn thread_order(&self) -> Result<HashMap<String, usize>> {
+            let response: ThreadOrderRpcResponse = self
+                .http
+                .post(format!(
+                    "{}/api/v1/plugins/status-sidebar/rpc/listThreadOrder",
+                    self.base_url
+                ))
+                .json(&serde_json::Value::Null)
+                .send()
+                .await
+                .context("could not query status-sidebar thread order")?
+                .error_for_status()
+                .context("status-sidebar rejected the thread-order request")?
+                .json()
+                .await
+                .context("status-sidebar returned invalid thread-order data")?;
+            Ok(response
+                .result
+                .thread_ids
+                .into_iter()
+                .enumerate()
+                .map(|(index, thread_id)| (thread_id, index))
+                .collect())
+        }
+
         fn ws_url(&self) -> Result<String> {
             if let Some(rest) = self.base_url.strip_prefix("http://") {
                 return Ok(format!("ws://{rest}/ws"));
@@ -437,14 +509,24 @@ mod linux {
                 HashMap::new()
             }
         };
-        let slots = slotted_threads(&threads, &later);
+        let order = match client.thread_order().await {
+            Ok(order) => order,
+            Err(error) => {
+                eprintln!("bb-led-bridge: could not read status-sidebar thread order: {error:#}");
+                HashMap::new()
+            }
+        };
+        let slots = slotted_threads(&threads, &later, &order);
         let summary = slots
             .iter()
             .enumerate()
             .map(|(index, thread)| format!("{}:{}", index + 1, color_name(thread.color())))
             .collect::<Vec<_>>()
             .join(" ");
-        if ble.write(&status_pixels(&threads, &later), force).await? {
+        if ble
+            .write(&status_pixels(&threads, &later, &order), force)
+            .await?
+        {
             println!(
                 "bb-led-bridge: {} status-sidebar slot{}{}",
                 slots.len(),
@@ -466,9 +548,11 @@ mod linux {
         };
         if parsed.get("type").and_then(|value| value.as_str()) == Some("plugin-signal")
             && parsed.get("pluginId").and_then(|value| value.as_str()) == Some("status-sidebar")
-            && parsed.get("channel").and_then(|value| value.as_str()) == Some("later-threads")
         {
-            return true;
+            return matches!(
+                parsed.get("channel").and_then(|value| value.as_str()),
+                Some("later-threads" | "thread-order")
+            );
         }
         const RELEVANT_CHANGES: &[&str] = &[
             "thread-created",
@@ -705,7 +789,6 @@ mod linux {
                 }
                 .to_string(),
                 project_id: "project".to_string(),
-                parent_thread_id: None,
                 archived_at: None,
                 pinned_at: None,
                 updated_at,
@@ -732,7 +815,7 @@ mod linux {
             question.latest_attention_at = 500;
             let idle = thread("idle", 900, "idle");
             let entries = vec![idle, active_grouped, question, active_middle, active_first];
-            let slots = slotted_threads(&entries, &HashMap::new());
+            let slots = slotted_threads(&entries, &HashMap::new(), &HashMap::new());
             assert_eq!(
                 slots
                     .iter()
@@ -749,19 +832,78 @@ mod linux {
         }
 
         #[test]
-        fn pinned_rows_win_only_inside_their_status_sidebar_section() {
+        fn pinned_section_precedes_status_sections() {
             let active = thread("active", 1, "active");
             let mut old_pinned_idle = thread("pinned-idle", 1, "idle");
             old_pinned_idle.pinned_at = Some(1);
             let new_idle = thread("new-idle", 999, "idle");
             let entries = vec![new_idle, old_pinned_idle, active];
-            let slots = slotted_threads(&entries, &HashMap::new());
+            let slots = slotted_threads(&entries, &HashMap::new(), &HashMap::new());
             assert_eq!(
                 slots
                     .iter()
                     .map(|thread| thread.id.as_str())
                     .collect::<Vec<_>>(),
-                vec!["active", "pinned-idle", "new-idle"]
+                vec!["pinned-idle", "active", "new-idle"]
+            );
+        }
+
+        #[test]
+        fn drag_order_is_respected_within_a_section() {
+            let entries = vec![
+                thread("first-by-time", 300, "active"),
+                thread("second-by-time", 200, "active"),
+                thread("third-by-time", 100, "active"),
+            ];
+            let order = HashMap::from([
+                ("third-by-time".to_string(), 0),
+                ("first-by-time".to_string(), 1),
+                ("second-by-time".to_string(), 2),
+            ]);
+            let slots = slotted_threads(&entries, &HashMap::new(), &order);
+            assert_eq!(
+                slots
+                    .iter()
+                    .map(|thread| thread.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["third-by-time", "first-by-time", "second-by-time"]
+            );
+        }
+
+        #[test]
+        fn pinned_status_groups_override_drag_order() {
+            let mut pinned_idle = thread("pinned-idle", 2, "idle");
+            pinned_idle.pinned_at = Some(2);
+            let mut pinned_active = thread("pinned-active", 1, "active");
+            pinned_active.pinned_at = Some(1);
+            let entries = vec![pinned_idle, pinned_active];
+            let order = HashMap::from([
+                ("pinned-idle".to_string(), 0),
+                ("pinned-active".to_string(), 1),
+            ]);
+            let slots = slotted_threads(&entries, &HashMap::new(), &order);
+            assert_eq!(
+                slots
+                    .iter()
+                    .map(|thread| thread.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["pinned-active", "pinned-idle"]
+            );
+        }
+
+        #[test]
+        fn unread_section_precedes_active_section() {
+            let active = thread("active", 2, "active");
+            let mut unread = thread("unread", 1, "idle");
+            unread.latest_attention_at = 11;
+            let entries = vec![active, unread];
+            let slots = slotted_threads(&entries, &HashMap::new(), &HashMap::new());
+            assert_eq!(
+                slots
+                    .iter()
+                    .map(|thread| thread.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["unread", "active"]
             );
         }
 
@@ -776,7 +918,7 @@ mod linux {
         fn retired_y_u_interaction_leds_stay_off() {
             let mut entry = thread("question", 1, "active");
             entry.has_pending_interaction = true;
-            let pixels = status_pixels(&[entry], &HashMap::new());
+            let pixels = status_pixels(&[entry], &HashMap::new(), &HashMap::new());
 
             assert_eq!(
                 pixels.iter().find(|(index, _)| *index == IDX_Y),
@@ -818,6 +960,9 @@ mod linux {
             ));
             assert!(message_requires_refresh(
                 r#"{"type":"plugin-signal","pluginId":"status-sidebar","channel":"later-threads","payload":{}}"#
+            ));
+            assert!(message_requires_refresh(
+                r#"{"type":"plugin-signal","pluginId":"status-sidebar","channel":"thread-order","payload":null}"#
             ));
         }
     }

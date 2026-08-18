@@ -3,7 +3,39 @@
 set -euo pipefail
 
 BB_URL="${BB_URL:-http://127.0.0.1:38886}"
+BB_DESKTOP_FILE="${BB_DESKTOP_FILE:-$HOME/.local/share/applications/BB.desktop}"
 STATE_FILE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bb-deck-active-thread"
+
+bb_app_url() {
+    local desktop_url
+    if [[ -n "${BB_APP_URL:-}" ]]; then
+        printf '%s\n' "$BB_APP_URL"
+        return
+    fi
+    if [[ -r "$BB_DESKTOP_FILE" ]]; then
+        desktop_url=$(sed -n \
+            's/^Exec=omarchy-launch-webapp[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' \
+            "$BB_DESKTOP_FILE" | head -n1)
+        if [[ -n "$desktop_url" ]]; then
+            printf '%s\n' "$desktop_url"
+            return
+        fi
+    fi
+    printf '%s\n' "$BB_URL/"
+}
+
+bb_window_class() {
+    local app_url host
+    if [[ -n "${BB_WINDOW_CLASS:-}" ]]; then
+        printf '%s\n' "$BB_WINDOW_CLASS"
+        return
+    fi
+    app_url=$(bb_app_url)
+    host=${app_url#*://}
+    host=${host%%/*}
+    host=${host%%:*}
+    printf 'chrome-%s__-Default\n' "$host"
+}
 
 find_bb() {
     if command -v bb >/dev/null 2>&1; then
@@ -17,18 +49,23 @@ find_bb() {
 }
 
 focus_bb() {
+    local app_url window_class
     # The PWA title changes to the selected thread, so match its stable
-    # Chromium app class rather than the transient title "bb".
-    omarchy-launch-or-focus "chrome-127.0.0.1__-Default" "omarchy-launch-webapp '$BB_URL/'"
+    # Chromium app class rather than the transient title. Both values come
+    # from the installed desktop entry so a web-app reinstall can change URL.
+    app_url=$(bb_app_url)
+    window_class=$(bb_window_class)
+    omarchy-launch-or-focus "$window_class" "omarchy-launch-webapp '$app_url'"
 }
 
 wait_for_bb_focus() {
-    local active_window title class
+    local active_window class initial_class window_class
+    window_class=$(bb_window_class)
     for _ in {1..40}; do
         active_window=$(hyprctl activewindow -j 2>/dev/null || true)
-        title=$(jq -r '.title // ""' <<<"$active_window" 2>/dev/null || true)
         class=$(jq -r '.class // ""' <<<"$active_window" 2>/dev/null || true)
-        if [[ "${title,,}" == "bb" || "$class" == chrome-127.0.0.1__-* ]]; then
+        initial_class=$(jq -r '.initialClass // ""' <<<"$active_window" 2>/dev/null || true)
+        if [[ "$class" == "$window_class" || "$initial_class" == "$window_class" ]]; then
             return 0
         fi
         sleep 0.05
@@ -37,15 +74,16 @@ wait_for_bb_focus() {
 }
 
 bb_is_focused() {
-    local active_window class initial_class
+    local active_window class initial_class window_class
+    window_class=$(bb_window_class)
     active_window=$(hyprctl activewindow -j 2>/dev/null) || return 1
     class=$(jq -r '.class // ""' <<<"$active_window" 2>/dev/null) || return 1
     initial_class=$(jq -r '.initialClass // ""' <<<"$active_window" 2>/dev/null) || return 1
-    [[ "$class" == chrome-127.0.0.1__-* || "$initial_class" == chrome-127.0.0.1__-* ]]
+    [[ "$class" == "$window_class" || "$initial_class" == "$window_class" ]]
 }
 
 status_sidebar_slots() {
-    local navigation later_rpc
+    local navigation later_rpc order_rpc
     navigation=$(curl -fsS "$BB_URL/api/v1/sidebar-bootstrap")
     if ! later_rpc=$(curl -fsS \
         -H 'content-type: application/json' \
@@ -53,14 +91,19 @@ status_sidebar_slots() {
         "$BB_URL/api/v1/plugins/status-sidebar/rpc/listLater"); then
         later_rpc='{"result":{"rows":[]}}'
     fi
+    if ! order_rpc=$(curl -fsS \
+        -H 'content-type: application/json' \
+        -d 'null' \
+        "$BB_URL/api/v1/plugins/status-sidebar/rpc/listThreadOrder"); then
+        order_rpc='{"result":{"threadIds":[]}}'
+    fi
 
-    jq -cn --argjson navigation "$navigation" --argjson laterRpc "$later_rpc" '
+    jq -cn \
+        --argjson navigation "$navigation" \
+        --argjson laterRpc "$later_rpc" \
+        --argjson orderRpc "$order_rpc" '
         def unread:
             (.lastReadAt // 0) < (.latestAttentionAt // 0);
-        def unread_done:
-            .parentThreadId == null
-            and (.status == "idle" or .status == "error")
-            and unread;
         def active:
             ([
                 .activity.activeWorkflowCount,
@@ -72,28 +115,44 @@ status_sidebar_slots() {
             or (.runtime.displayStatus as $status
                 | ["active", "host-reconnecting", "provisioning", "starting", "stopping"]
                 | index($status) != null);
-        def bucket($later):
-            if .archivedAt != null then 4
-            elif .hasPendingInteraction or (.status == "error" and unread_done) then 1
-            elif active then 0
-            elif $later[.id] != null then 3
-            else 2
-            end;
-        def bucket_name($bucket):
-            ["active", "needs-input", "idle", "later", "archived"][$bucket];
-        def color:
-            if .hasPendingInteraction then "question"
-            elif .status == "error" and unread_done then "error"
-            elif active then "working"
-            elif unread_done then "unread"
+        def status($later):
+            if .archivedAt != null then "archived"
+            elif .hasPendingInteraction or (.status == "error" and unread) then "needs-input"
+            elif active then "active"
+            elif unread then "unread"
+            elif $later[.id] != null then "later"
             else "idle"
             end;
-        def sorted_bucket($bucket; $later):
+        def bucket($later):
+            if .archivedAt != null then "archived"
+            elif .pinnedAt != null then "pinned"
+            else status($later)
+            end;
+        def pinned_status_rank($later):
+            status($later) as $status
+            | {
+                "needs-input": 0,
+                "unread": 1,
+                "active": 2,
+                "idle": 3,
+                "later": 4,
+                "archived": 5
+              }[$status];
+        def color:
+            if .hasPendingInteraction then "question"
+            elif .status == "error" and unread then "error"
+            elif active then "working"
+            elif unread then "unread"
+            else "idle"
+            end;
+        def sorted_bucket($bucket; $later; $order):
             map(select(bucket($later) == $bucket))
             | sort_by(
-                (if .pinnedAt != null then 0 else 1 end),
-                (if $bucket == 3 then -($later[.id] // 0)
-                 elif $bucket == 1 then -(.latestAttentionAt // 0)
+                (if $bucket == "pinned" then pinned_status_rank($later) else 0 end),
+                (if $order[.id] == null then 0 else 1 end),
+                ($order[.id] // 0),
+                (if $bucket == "later" then -($later[.id] // 0)
+                 elif $bucket == "needs-input" then -(.latestAttentionAt // 0)
                  else -(.updatedAt // 0)
                  end),
                 ._source
@@ -115,14 +174,18 @@ status_sidebar_slots() {
         (reduce ($laterRpc.result.rows // [])[] as $row ({};
             .[$row.threadId] = $row.placedAt
         )) as $later
+        | (reduce (($orderRpc.result.threadIds // []) | to_entries[]) as $entry ({};
+            .[$entry.value] = $entry.key
+        )) as $order
         | ((($navigation.projects // []) + [$navigation.personalProject])
             | map(.threads // []) | add // []) as $source
         | [range(0; $source | length) as $index
             | $source[$index] + { _source: $index }] as $rows
-        | [range(0; 5) as $bucket
-            | ($rows | sorted_bucket($bucket; $later) | environment_grouped)[]
+        | ["pinned", "unread", "active", "needs-input", "idle", "later", "archived"] as $buckets
+        | [$buckets[] as $bucket
+            | ($rows | sorted_bucket($bucket; $later; $order) | environment_grouped)[]
             | . + {
-                bucket: bucket_name($bucket),
+                bucket: $bucket,
                 color: color
               }]
         | .[:10]
