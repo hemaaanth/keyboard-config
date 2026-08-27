@@ -1,7 +1,7 @@
 layout: {zmk_keyboard: go60}
 layers:
   Linux:
-  - {t: '=', s: +}
+  - $$mdi:keyboard-esc$$
   - {t: '1', s: '!'}
   - {t: '2', s: '@'}
   - {t: '3', s: '#'}
@@ -24,7 +24,7 @@ layers:
   - I
   - O
   - P
-  - $$mdi:keyboard-esc$$
+  - {t: '=', s: +}
   - Number
   - A
   - S
@@ -62,7 +62,7 @@ layers:
   - {t: '$$mdi:keyboard-return$$', h: Fn}
   - $$mdi:keyboard-space$$
   Mac:
-  - {t: '=', s: +}
+  - $$mdi:keyboard-esc$$
   - {t: '1', s: '!'}
   - {t: '2', s: '@'}
   - {t: '3', s: '#'}
@@ -85,7 +85,7 @@ layers:
   - I
   - O
   - P
-  - $$mdi:keyboard-esc$$
+  - {t: '=', s: +}
   - Number
   - A
   - S
@@ -113,13 +113,13 @@ layers:
   - {t: '&rgb_ug_status_macro', h: Magic}
   - {t: '`', s: '~'}
   - $$mdi:backspace-reverse-outline$$
-  - Hyper+F16
+  - RMETA
   - {t: '[', s: '{'}
   - {t: ']', s: '}'}
-  - $$mdi:apple-keyboard-control$$
+  - RGUI
   - {t: '$$mdi:backspace$$', type: backspace}
   - $$mdi:apple-keyboard-option$$
-  - RGUI
+  - Hyper+F16
   - {t: '$$mdi:keyboard-return$$', h: Fn}
   - $$mdi:keyboard-space$$
   Number:
@@ -354,13 +354,13 @@ layers:
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: Factory, h: toggle}
-  - {t: OUT USB, type: held}
+  - {t: '$$mdi:minus-circle-outline$$', type: held}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
-  - {t: '$$mdi:minus-circle-outline$$', type: none}
+  - OUT USB
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
   - {t: '$$mdi:minus-circle-outline$$', type: none}
